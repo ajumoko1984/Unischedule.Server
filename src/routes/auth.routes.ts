@@ -1,0 +1,14 @@
+import { Router } from 'express';
+import { register, login, getMe, checkRoleAvailability, forgotPassword, resetPassword } from '../controllers/auth.controller';
+import { protect } from '../middleware/auth.middleware';
+
+const router = Router();
+
+router.post('/register', register);
+router.post('/login', login);
+router.get('/me', protect, getMe);
+router.get('/role-availability', checkRoleAvailability); 
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password/:token', resetPassword);
+
+export default router;
