@@ -151,7 +151,7 @@ export const sendEventReminderEmail = async (
 
 export const sendAnnouncementEmail = async (
   recipients: string[],
-  data: { subject: string; message: string; sentBy: string; faculty: string; level: string }
+  data: { subject: string; message: string; sentBy: string; faculty: string; level: string , courseOfStudy: string }
 ): Promise<void> => {
   const content = `
     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin-bottom:24px;">

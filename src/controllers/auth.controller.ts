@@ -160,7 +160,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
     await user.save();
 
     // Create reset URL
-    const resetUrl = `https://unischedule-two.vercel.app/reset-password/${resetToken}`;
+  const resetUrl = `https://unischedule-two.vercel.app/reset-password/${resetToken}`;
 
     // Send email
     await sendAnnouncementEmail([user.email], {
