@@ -44,6 +44,7 @@ export const sendAnnouncement = async (req: AuthRequest, res: Response): Promise
         sentBy: req.user.fullName,
         faculty: req.user.faculty,
         level: req.user.level,
+        courseOfStudy: req.user.courseOfStudy,
       });
     }
 
@@ -105,8 +106,8 @@ export const sendTimetableNotification = async (req: AuthRequest, res: Response)
         message,
         sentBy: req.user.fullName,
         faculty: req.user.faculty,
-        level: req.user.level
-
+        level: req.user.level,
+        courseOfStudy: req.user.courseOfStudy,
       });
     }
 
