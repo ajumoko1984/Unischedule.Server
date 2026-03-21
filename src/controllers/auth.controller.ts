@@ -168,7 +168,8 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
       message: `Click to reset your password: ${resetUrl}`,
       sentBy: 'UniSchedule',
       faculty: '',
-      level: ''
+      level: '',
+      courseOfStudy: '',
     });
 
     res.json({ success: true, message: 'Reset link sent to email' });
