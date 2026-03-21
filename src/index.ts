@@ -11,6 +11,8 @@ import timetableRoutes from './routes/timetable.routes';
 import eventRoutes from './routes/event.routes';
 import notificationRoutes from './routes/notification.routes';
 import userRoutes from './routes/user.routes';
+import studyPlanRoutes from './routes/studyplan.routes';
+import assignmentRoutes from './routes/assignment.routes';
 
 const app = express();
 
@@ -28,6 +30,8 @@ app.use('/api/timetable', timetableRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/study-plan', studyPlanRoutes);
+app.use('/api/assignments', assignmentRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
