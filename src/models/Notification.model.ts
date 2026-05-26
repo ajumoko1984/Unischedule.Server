@@ -10,8 +10,8 @@ export interface INotification extends Document {
   recipientCount: number;
   sentBy: mongoose.Types.ObjectId;
   faculty: string;
-  level: string;
-  courseOfStudy: string;
+  level?: string;
+  courseOfStudy?: string;
   relatedEvent?: mongoose.Types.ObjectId;
   relatedTimetableId?: mongoose.Types.ObjectId;
   isAutomatic: boolean;
@@ -33,8 +33,8 @@ const notificationSchema = new Schema<INotification>(
     recipientCount: { type: Number, default: 0 },
     sentBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     faculty: { type: String, required: true },
-    level: { type: String, required: true },
-    courseOfStudy: { type: String, required: true },
+    level: { type: String },
+    courseOfStudy: { type: String },
     relatedEvent: { type: Schema.Types.ObjectId, ref: 'Event' },
     relatedTimetableId: { type: Schema.Types.ObjectId, ref: 'Timetable' },
     isAutomatic: { type: Boolean, default: false },

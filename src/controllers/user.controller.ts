@@ -25,6 +25,34 @@ export const getAllUsers = async (req: AuthRequest, res: Response): Promise<void
   }
 };
 
+// ── Public check if a level adviser exists for a given faculty/level/department ──
+export const checkLevelAdviserExists = async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const faculty = (_req.query.faculty as string | undefined)?.trim();
+    const facultyId = (_req.query.facultyId as string | undefined)?.trim();
+    const level = (_req.query.level as string | undefined)?.trim();
+    const department = (_req.query.department as string | undefined)?.trim();
+
+    const facultyQuery = faculty || facultyId;
+
+    if (!facultyQuery || !level || !department) {
+      res.status(400).json({ success: false, message: 'faculty, level, and department are required' });
+      return;
+    }
+
+    const adviser = await User.findOne({
+      role: 'level_adviser',
+      faculty: new RegExp(`^${facultyQuery}$`, 'i'),
+      level: new RegExp(`^${level}$`, 'i'),
+      courseOfStudy: new RegExp(`^${department}$`, 'i'),
+    }).select('-password');
+
+    res.json({ success: true, exists: Boolean(adviser), data: adviser || null });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // ── Create user (super admin only) ───────────────────────────────────────────
 export const createUserByAdmin = async (req: AuthRequest, res: Response): Promise<void> => {
   try {

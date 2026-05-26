@@ -19,7 +19,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     if (!secret) throw new Error('JWT_SECRET not configured');
 
     const decoded = jwt.verify(token, secret) as { id: string };
-    const user = await User.findById(decoded.id).select('-password');
+    const user = await User.findById(decoded.id);
 
     if (!user) {
       res.status(401).json({ success: false, message: 'User not found' });

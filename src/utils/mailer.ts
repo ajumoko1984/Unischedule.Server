@@ -1,12 +1,22 @@
-import nodemailer from 'nodemailer';
+import * as nodemailer from 'nodemailer';
+
+const mailPort = Number(process.env.MAIL_PORT) || 587;
+const mailHost = process.env.MAIL_HOST || 'smtp.gmail.com';
+const mailSecure = process.env.MAIL_SECURE
+  ? process.env.MAIL_SECURE.toLowerCase() === 'true'
+  : mailPort === 465;
+const mailFrom = process.env.MAIL_FROM || process.env.MAIL_USER || 'no-reply@unischedule.app';
 
 const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_HOST || 'smtp.gmail.com',
-  port: Number(process.env.MAIL_PORT) || 587,
-  secure: false,
+  host: mailHost,
+  port: mailPort,
+  secure: mailSecure,
   auth: {
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS,
+  },
+  tls: {
+    rejectUnauthorized: false,
   },
 });
 
@@ -94,8 +104,8 @@ export const sendVenueChangeEmail = async (
     <p style="color:#64748b;font-size:13px;margin:0;">Please update your schedule accordingly and inform your classmates.</p>`;
 
   await transporter.sendMail({
-    from: process.env.MAIL_FROM,
-    to: process.env.MAIL_FROM || recipients[0],
+    from: mailFrom,
+    to: mailFrom,
     bcc: recipients,
     subject: `⚠️ Venue Change: ${data.courseCode} – ${data.day}`,
     html: baseTemplate(content, `Venue changed for ${data.courseCode} on ${data.day}`),
@@ -141,8 +151,8 @@ export const sendEventReminderEmail = async (
     </div>`;
 
   await transporter.sendMail({
-    from: process.env.MAIL_FROM,
-    to: process.env.MAIL_FROM || recipients[0],
+    from: mailFrom,
+    to: mailFrom,
     bcc: recipients,
     subject: `${emoji} Reminder: ${data.title} – ${data.date}`,
     html: baseTemplate(content, `${data.category} reminder for ${data.courseCode}`),
@@ -151,11 +161,19 @@ export const sendEventReminderEmail = async (
 
 export const sendAnnouncementEmail = async (
   recipients: string[],
-  data: { subject: string; message: string; sentBy: string; faculty: string; level: string , courseOfStudy: string }
+  data: { subject: string; message: string; sentBy: string; faculty: string; level?: string; courseOfStudy?: string }
 ): Promise<void> => {
+  const cohortLabel = data.level && data.courseOfStudy
+    ? `${data.level} Level – ${data.courseOfStudy}`
+    : data.level
+      ? `${data.level} Level`
+      : data.courseOfStudy
+        ? data.courseOfStudy
+        : 'All students';
+
   const content = `
     <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px 20px;margin-bottom:24px;">
-      <strong style="color:#1d4ed8;font-size:14px;">📢 Announcement from ${data.faculty} – ${data.level} Level</strong>
+      <strong style="color:#1d4ed8;font-size:14px;">📢 Announcement from ${data.faculty}${cohortLabel ? ' – ' + cohortLabel : ''}</strong>
     </div>
     <h2 style="color:#1e293b;font-size:20px;margin:0 0 16px;">${data.subject}</h2>
     <div style="color:#475569;font-size:14px;line-height:1.7;margin-bottom:24px;white-space:pre-wrap;">${data.message}</div>
@@ -163,11 +181,37 @@ export const sendAnnouncementEmail = async (
     <p style="color:#94a3b8;font-size:12px;margin:0;">Sent by: ${data.sentBy}</p>`;
 
   await transporter.sendMail({
-    from: process.env.MAIL_FROM,
-    to: process.env.MAIL_FROM || recipients[0],
+    from: mailFrom,
+    to: mailFrom,
     bcc: recipients,
     subject: `📢 ${data.subject}`,
     html: baseTemplate(content, data.subject),
+  });
+};
+
+export const sendPasswordResetEmail = async (
+  email: string,
+  data: { resetUrl: string; fullName: string }
+): Promise<void> => {
+  const content = `
+    <h2 style="color:#1e293b;font-size:20px;margin:0 0 8px;">Reset Your Password</h2>
+    <p style="color:#64748b;font-size:14px;margin:0 0 24px;">Hello ${data.fullName},</p>
+    <p style="color:#64748b;font-size:14px;margin:0 0 24px;">We received a request to reset your password. Click the button below to create a new password.</p>
+    <div style="text-align:center;margin-bottom:24px;">
+      <a href="${data.resetUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;padding:12px 32px;border-radius:6px;text-decoration:none;font-weight:500;font-size:14px;">Reset Password</a>
+    </div>
+    <p style="color:#64748b;font-size:13px;margin:0 0 16px;">Or copy and paste this link in your browser:</p>
+    <p style="color:#2563eb;font-size:12px;word-break:break-all;margin:0 0 24px;">${data.resetUrl}</p>
+    <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
+      <p style="color:#92400e;font-size:12px;margin:0;">⚠️ This link will expire in 15 minutes. If you didn't request a password reset, please ignore this email.</p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: mailFrom,
+    to: email,
+    subject: 'Reset Your UniSchedule Password',
+    html: baseTemplate(content, 'Password reset link'),
   });
 };
 

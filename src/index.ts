@@ -13,6 +13,9 @@ import notificationRoutes from './routes/notification.routes';
 import userRoutes from './routes/user.routes';
 import studyPlanRoutes from './routes/studyplan.routes';
 import assignmentRoutes from './routes/assignment.routes';
+import courseForm from './routes/courseform.routes';
+import exams from './routes/exam.routes';
+import tests from './routes/test.routes';
 
 const app = express();
 
@@ -32,6 +35,9 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/study-plan', studyPlanRoutes);
 app.use('/api/assignments', assignmentRoutes);
+app.use('/api/course-forms', courseForm);
+app.use('/api/exams', exams);
+app.use('/api/tests', tests);
 
 // Health check
 app.get('/api/health', (_req, res) => {

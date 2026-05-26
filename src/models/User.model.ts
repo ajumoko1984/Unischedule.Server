@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-export type UserRole = 'super_admin' | 'level_adviser' | 'class_rep' | 'student';
+export type UserRole = 'super_admin' | 'level_adviser' | 'exam_officer' | 'class_rep' | 'student';
 
 export interface IUser extends Document {
   fullName: string;
@@ -9,15 +9,17 @@ export interface IUser extends Document {
   password: string;
   role: UserRole;
   faculty: string;
+  facultyId?: string;
   level: string; // e.g., "400"
   courseOfStudy: string; // e.g., "Educational Technology"
   matricNumber?: string;
+  levelAdviserUserId?: string;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidatePassword: string): Promise<boolean>;
   resetPasswordToken?: String;
-resetPasswordExpire?: Date;
+  resetPasswordExpire?: Date;
 }
 
 const userSchema = new Schema<IUser>(
@@ -27,13 +29,15 @@ const userSchema = new Schema<IUser>(
     password: { type: String, required: true, minlength: 6 },
     role: {
       type: String,
-      enum: ['super_admin', 'level_adviser', 'class_rep', 'student'],
+      enum: ['super_admin', 'level_adviser', 'exam_officer', 'class_rep', 'student'],
       default: 'student',
     },
     faculty: { type: String },
+    facultyId: { type: String },
     level: { type: String}, // "100", "200", "300", "400"
     courseOfStudy: { type: String},
     matricNumber: { type: String, sparse: true },
+    levelAdviserUserId: { type: String },
     isActive: { type: Boolean, default: true },
     resetPasswordToken: { type: String },
     resetPasswordExpire: { type: Date },

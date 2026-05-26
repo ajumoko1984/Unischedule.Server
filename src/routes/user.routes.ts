@@ -9,10 +9,14 @@ import {
   getStudentsForLevel,
   assignClassRep,
   revokeClassRep,
+  checkLevelAdviserExists,
 } from '../controllers/user.controller';
 import { protect, authorize } from '../middleware/auth.middleware';
 
 const router = Router();
+
+// Public endpoint used during registration to verify whether a level adviser already exists
+router.get('/level-adviser-exists', checkLevelAdviserExists);
 
 router.use(protect);
 

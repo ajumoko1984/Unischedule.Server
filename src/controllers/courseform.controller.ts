@@ -44,11 +44,11 @@ export const createCourseForm = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const { courses, faculty, level, academicYear, semester, notes } = req.body;
+    const { courses, faculty, courseOfStudy, level, academicYear, semester, notes } = req.body;
 
     // Validation
-    if (!faculty || !level) {
-      res.status(400).json({ success: false, message: 'Faculty, and level are required' });
+    if (!faculty || !courseOfStudy || !level) {
+      res.status(400).json({ success: false, message: 'Faculty, courseOfStudy, and level are required' });
       return;
     }
 
@@ -67,9 +67,10 @@ export const createCourseForm = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    // Check if already submitted for this level/department/academic year/semester
+    // Check if already submitted for this faculty/courseOfStudy/level/academic year/semester
     const existingForm = await CourseForm.findOne({
       faculty,
+      courseOfStudy,
       level,
       academicYear,
       semester: normalizedSemester,
@@ -94,9 +95,10 @@ export const createCourseForm = async (req: AuthRequest, res: Response): Promise
       creditUnits: course.creditUnits,
     }));
 
-    // Find or create/update course form
+    // Find or create/update course form for this faculty/courseOfStudy/level/semester/year
     let courseForm = await CourseForm.findOne({
       faculty,
+      courseOfStudy,
       level,
       academicYear,
       semester: normalizedSemester,
@@ -109,6 +111,7 @@ export const createCourseForm = async (req: AuthRequest, res: Response): Promise
         academicYear,
         semester: normalizedSemester,
         faculty,
+        courseOfStudy,
         level,
         notes,
       });
@@ -215,13 +218,13 @@ export const submitCourseForm = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    // Change status to submitted (not approved yet)
-    courseForm.status = 'submitted';
+    
+    courseForm.status = 'approved';
     await courseForm.save();
 
     res.json({
       success: true,
-      message: 'Course form submitted successfully',
+      message: 'Course form submitted and approved successfully',
       courseForm,
     });
   } catch (error: any) {
@@ -239,16 +242,38 @@ export const getCourseForms = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const { faculty, level, academicYear, semester, status } = req.query;
+    const { faculty, courseOfStudy, level, academicYear, semester, status } = req.query;
 
     let filter: any = {};
 
     // Add filters if provided
     if (faculty) filter.faculty = faculty;
+    if (courseOfStudy) filter.courseOfStudy = courseOfStudy;
     if (level) filter.level = level;
     if (academicYear) filter.academicYear = academicYear;
     if (semester) filter.semester = (semester as string).toLowerCase();
     if (status) filter.status = status;
+
+    if (req.user.role === 'student') {
+      const student = await User.findById(req.user._id).select('faculty level courseOfStudy');
+      if (student) {
+        filter.faculty = student.faculty;
+        filter.level = student.level;
+        filter.courseOfStudy = student.courseOfStudy;
+        if (!status) filter.status = 'approved';
+      }
+    } else if (req.user.role === 'class_rep') {
+      // Class reps are students - they only see approved forms for their faculty/level/courseOfStudy
+      if (!faculty && req.user.faculty) filter.faculty = req.user.faculty;
+      if (!courseOfStudy && req.user.courseOfStudy) filter.courseOfStudy = req.user.courseOfStudy;
+      if (!level && req.user.level) filter.level = req.user.level;
+      if (!status) filter.status = 'approved'; // Only approved forms for class reps
+    } else if (req.user.role === 'level_adviser') {
+      // Level advisers see all forms for their faculty
+      if (!faculty && req.user.faculty) filter.faculty = req.user.faculty;
+      if (!courseOfStudy && req.user.courseOfStudy) filter.courseOfStudy = req.user.courseOfStudy;
+      if (!level && req.user.level) filter.level = req.user.level;
+    }
 
     const forms = await CourseForm.find(filter)
       .populate('approvedBy', 'fullName email')
@@ -307,13 +332,18 @@ export const approveCourseForm = async (req: AuthRequest, res: Response): Promis
       return;
     }
 
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Not authorized' });
+      return;
+    }
+
     if (courseForm.status !== 'submitted') {
       res.status(400).json({ success: false, message: 'Only submitted forms can be approved' });
       return;
     }
 
     courseForm.status = 'approved';
-    courseForm.approvedBy = req.user._id;
+    courseForm.approvedBy = req.user._id as any;
     courseForm.approvalDate = new Date();
     if (notes) courseForm.notes = notes;
 
@@ -388,12 +418,14 @@ export const getApprovedCourseForm = async (req: AuthRequest, res: Response): Pr
       const nextYear = year + 1;
       academicYear = `${year}/${nextYear}`;
     }
-    
+  
+
+    // Default semester to current term if not provided, then normalize to lowercase
     if (!semester) {
-      semester = 'first';
+      const now = new Date();
+      semester = now.getMonth() < 6 ? 'first' : 'second';
     }
 
-    // Normalize semester to lowercase
     const normalizedSemester = (semester as string).toLowerCase();
 
     // Get the student's info to determine their faculty and level
@@ -405,9 +437,9 @@ export const getApprovedCourseForm = async (req: AuthRequest, res: Response): Pr
 
     const courseForm = await CourseForm.findOne({
       faculty: student.faculty,
+      courseOfStudy: student.courseOfStudy,
       level: student.level,
       academicYear,
-      semester: normalizedSemester,
       status: 'approved',
     });
 

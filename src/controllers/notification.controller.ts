@@ -3,13 +3,30 @@ import Notification from '../models/Notification.model';
 import User from '../models/User.model';
 import { sendAnnouncementEmail } from '../utils/mailer';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { getNotificationRecipientEmails, resolveNotificationScope } from '../utils/notificationHelper';
+
+const normalizeNotificationType = (type?: string) => {
+  const normalized = type ? type.toString().trim().toLowerCase() : '';
+  if (['venue_change', 'new_event', 'reminder', 'announcement', 'cancellation'].includes(normalized)) {
+    return normalized;
+  }
+  if (normalized === 'exam_update') {
+    return 'new_event';
+  }
+  return 'announcement';
+};
 
 export const getNotifications = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const filter: Record<string, unknown> = {};
     if (req.user && req.user.role !== 'super_admin') {
-      filter.level = req.user.level;
-      filter.courseOfStudy = req.user.courseOfStudy;
+      if (req.user.role === 'exam_officer') {
+        if (req.user.faculty) filter.faculty = req.user.faculty;
+      } else {
+        filter.faculty = req.user.faculty;
+        filter.level = req.user.level;
+        filter.courseOfStudy = req.user.courseOfStudy;
+      }
     }
     const notifications = await Notification.find(filter)
       .sort({ createdAt: -1 })
@@ -26,25 +43,22 @@ export const sendAnnouncement = async (req: AuthRequest, res: Response): Promise
     if (!req.user) { res.status(401).json({ success: false, message: 'Not authorized' }); return; }
 
     const { subject, message } = req.body;
-    const students = await User.find({
-      level: req.user.level,
-      courseOfStudy: req.user.courseOfStudy,
-      role: { $in: ['student', 'class_rep'] },
-      isActive: true,
-    }).select('email');
+    if (!subject || !message) {
+      res.status(400).json({ success: false, message: 'subject and message are required' });
+      return;
+    }
 
-    console.log(students);
-
-    const emails = students.map(s => s.email);
+    const scope = resolveNotificationScope(req);
+    const emails = await getNotificationRecipientEmails(scope);
 
     if (emails.length > 0) {
       await sendAnnouncementEmail(emails, {
         subject,
         message,
         sentBy: req.user.fullName,
-        faculty: req.user.faculty,
-        level: req.user.level,
-        courseOfStudy: req.user.courseOfStudy,
+        faculty: scope.faculty || req.user.faculty || 'University',
+        level: scope.level || '',
+        courseOfStudy: scope.courseOfStudy || '',
       });
     }
 
@@ -55,14 +69,58 @@ export const sendAnnouncement = async (req: AuthRequest, res: Response): Promise
       recipients: emails,
       recipientCount: emails.length,
       sentBy: req.user._id,
-      faculty: req.user.faculty,
-      level: req.user.level,
-      courseOfStudy: req.user.courseOfStudy,
+      faculty: scope.faculty || req.user.faculty || 'University',
+      level: scope.level,
+      courseOfStudy: scope.courseOfStudy,
       isAutomatic: false,
       deliveryStatus: emails.length > 0 ? 'sent' : 'pending',
     });
 
-    res.status(201).json({ success: true, data: notification, message: `Announcement sent to ${emails.length} students` });
+    res.status(201).json({ success: true, data: notification, message: `Announcement sent to ${emails.length} student${emails.length !== 1 ? 's' : ''}` });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const sendCourseNotification = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) { res.status(401).json({ success: false, message: 'Not authorized' }); return; }
+
+    const { subject, message, courseCode, type } = req.body;
+    if (!subject || !message || !courseCode) {
+      res.status(400).json({ success: false, message: 'subject, message and courseCode are required' });
+      return;
+    }
+
+    const scope = resolveNotificationScope(req);
+    const emails = await getNotificationRecipientEmails(scope);
+
+    if (emails.length > 0) {
+      await sendAnnouncementEmail(emails, {
+        subject,
+        message,
+        sentBy: req.user.fullName,
+        faculty: scope.faculty || req.user.faculty || 'University',
+        level: scope.level || '',
+        courseOfStudy: scope.courseOfStudy || '',
+      });
+    }
+
+    const notification = await Notification.create({
+      type: normalizeNotificationType(type),
+      subject,
+      message,
+      recipients: emails,
+      recipientCount: emails.length,
+      sentBy: req.user._id,
+      faculty: scope.faculty || req.user.faculty || 'University',
+      level: scope.level,
+      courseOfStudy: scope.courseOfStudy,
+      isAutomatic: false,
+      deliveryStatus: emails.length > 0 ? 'sent' : 'pending',
+    });
+
+    res.status(201).json({ success: true, data: notification, message: `Course notification sent to ${emails.length} student${emails.length !== 1 ? 's' : ''}` });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -89,38 +147,30 @@ export const sendTimetableNotification = async (req: AuthRequest, res: Response)
       return;
     }
 
-    // Always scoped to the sender's own level + course
-    const students = await User.find({
-      level: req.user.level,
-      courseOfStudy: req.user.courseOfStudy,
-      role: { $in: ['student', 'class_rep'] },
-      isActive: true,
-    }).select('email');
-
-    const emails = students.map(s => s.email);
+    const scope = resolveNotificationScope(req);
+    const emails = await getNotificationRecipientEmails(scope);
 
     if (emails.length > 0) {
-      // Reuse the announcement email template — it handles any freeform message
       await sendAnnouncementEmail(emails, {
         subject,
         message,
         sentBy: req.user.fullName,
-        faculty: req.user.faculty,
-        level: req.user.level,
-        courseOfStudy: req.user.courseOfStudy,
+        faculty: scope.faculty || req.user.faculty || 'University',
+        level: scope.level || '',
+        courseOfStudy: scope.courseOfStudy || '',
       });
     }
 
     await Notification.create({
-      type: type || 'reminder',
+      type: normalizeNotificationType(type) || 'reminder',
       subject,
       message,
       recipients: emails,
       recipientCount: emails.length,
       sentBy: req.user._id,
-      faculty: req.user.faculty,
-      level: req.user.level,
-      courseOfStudy: req.user.courseOfStudy,
+      faculty: scope.faculty || req.user.faculty || 'University',
+      level: scope.level,
+      courseOfStudy: scope.courseOfStudy,
       isAutomatic: false,
       deliveryStatus: emails.length > 0 ? 'sent' : 'pending',
     });
