@@ -57,10 +57,13 @@ export const submitExamComplaint = async (req: AuthRequest, res: Response): Prom
       priority: priority || 'medium',
     });
 
+    await complaint.populate('studentId', 'fullName email matricNumber');
+    await complaint.populate('examId', 'title courseCode');
+
     res.status(201).json({
       success: true,
       message: 'Complaint submitted successfully. Your class rep will review it.',
-      complaint: await complaint.populate('studentId', 'fullName email matricNumber').then(c => c.populate('examId', 'title courseCode')),
+      complaint,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -174,10 +177,13 @@ export const acknowledgeComplaint = async (req: AuthRequest, res: Response): Pro
     complaint.classRepId = req.user._id;
     await complaint.save();
 
+    await complaint.populate('studentId', 'fullName email');
+    await complaint.populate('examId', 'title courseCode');
+
     res.json({
       success: true,
       message: 'Complaint acknowledged. You are now handling this.',
-      complaint: await complaint.populate('studentId', 'fullName email').populate('examId', 'title courseCode'),
+      complaint,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -208,7 +214,8 @@ export const respondToComplaint = async (req: AuthRequest, res: Response): Promi
       return;
     }
 
-    if (complaint.classRepId?.toString() !== req.user._id.toString() && req.user.role !== 'super_admin') {
+    const isSuperAdmin = req.user && 'role' in req.user && (req.user as any).role === 'super_admin';
+    if (complaint.classRepId?.toString() !== req.user._id.toString() && !isSuperAdmin) {
       res.status(403).json({ success: false, message: 'You are not handling this complaint' });
       return;
     }
@@ -218,10 +225,13 @@ export const respondToComplaint = async (req: AuthRequest, res: Response): Promi
     complaint.status = 'acknowledged';
     await complaint.save();
 
+    await complaint.populate('studentId', 'fullName email');
+    await complaint.populate('examId', 'title courseCode');
+
     res.json({
       success: true,
       message: 'Response sent to student',
-      complaint: await complaint.populate('studentId', 'fullName email').populate('examId', 'title courseCode'),
+      complaint,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -260,7 +270,8 @@ export const escalateComplaint = async (req: AuthRequest, res: Response): Promis
       return;
     }
 
-    if (complaint.classRepId?.toString() !== req.user._id.toString() && req.user.role !== 'super_admin') {
+    const isSuperAdmin = req.user && 'role' in req.user && (req.user as any).role === 'super_admin';
+    if (complaint.classRepId?.toString() !== req.user._id.toString() && !isSuperAdmin) {
       res.status(403).json({ success: false, message: 'You are not handling this complaint' });
       return;
     }
@@ -277,10 +288,13 @@ export const escalateComplaint = async (req: AuthRequest, res: Response): Promis
 
     await complaint.save();
 
+    await complaint.populate('studentId', 'fullName email');
+    await complaint.populate('examId', 'title courseCode');
+
     res.json({
       success: true,
       message: `Complaint escalated to ${escalateTo === 'level_adviser' ? 'Level Adviser' : 'Exam Officer'}`,
-      complaint: await complaint.populate('studentId', 'fullName email').populate('examId', 'title courseCode'),
+      complaint,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -311,7 +325,8 @@ export const resolveComplaint = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    if (complaint.classRepId?.toString() !== req.user._id.toString() && req.user.role !== 'super_admin') {
+    const isSuperAdmin = req.user && 'role' in req.user && (req.user as any).role === 'super_admin';
+    if (complaint.classRepId?.toString() !== req.user._id.toString() && !isSuperAdmin) {
       res.status(403).json({ success: false, message: 'You are not handling this complaint' });
       return;
     }
@@ -321,10 +336,13 @@ export const resolveComplaint = async (req: AuthRequest, res: Response): Promise
     complaint.resolvedDate = new Date();
     await complaint.save();
 
+    await complaint.populate('studentId', 'fullName email');
+    await complaint.populate('examId', 'title courseCode');
+
     res.json({
       success: true,
       message: 'Complaint marked as resolved',
-      complaint: await complaint.populate('studentId', 'fullName email').populate('examId', 'title courseCode'),
+      complaint,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
