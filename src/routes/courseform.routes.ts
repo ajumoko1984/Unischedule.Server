@@ -16,7 +16,7 @@ const router = Router();
 
 // Student and Level Adviser routes - VIEW ONLY
 router.get('/', protect, authorize('student', 'super_admin', 'level_adviser', 'class_rep'), getCourseForms); // List course forms
-router.get('/my-approved', protect, authorize('student', 'level_adviser', 'super_admin'), getApprovedCourseForm); // Get approved course form
+router.get('/my-approved', protect, authorize('student', 'level_adviser', 'super_admin', 'class_rep'), getApprovedCourseForm); // Get approved course form
 router.get('/:id', protect, authorize('student', 'super_admin', 'level_adviser', 'class_rep'), getCourseFormById); // View specific form
 
 // Level Adviser & Class Rep routes - MANAGE FOR STUDENTS
