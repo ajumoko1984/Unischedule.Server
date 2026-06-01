@@ -36,6 +36,7 @@ const validateCourses = (courses: any[]): { valid: boolean; error?: string } => 
 
 /**
  * Create a course form for a level/department (level adviser/class rep only)
+ * or for a specific student (carry-over/overload case)
  */
 export const createCourseForm = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -44,7 +45,30 @@ export const createCourseForm = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    const { courses, faculty, courseOfStudy, level, academicYear, semester, notes } = req.body;
+    const { courses, faculty, courseOfStudy, level, academicYear, semester, notes, studentId } = req.body;
+
+    // If creating a form for a specific student, validate the student exists and access
+    if (studentId) {
+      const student = await User.findById(studentId);
+      if (!student) {
+        res.status(404).json({ success: false, message: 'Student not found' });
+        return;
+      }
+
+      // Permission check: level adviser/class rep can only edit students in their scope
+      if (req.user.role === 'level_adviser' && 
+          (req.user.faculty !== student.faculty || 
+           req.user.courseOfStudy !== student.courseOfStudy || 
+           req.user.level !== student.level)) {
+        res.status(403).json({ success: false, message: 'You can only manage forms for students in your level/department' });
+        return;
+      }
+
+      if (req.user.role === 'class_rep' && req.user._id.toString() !== studentId) {
+        res.status(403).json({ success: false, message: 'Class reps can only edit their own course form' });
+        return;
+      }
+    }
 
     // Validation
     if (!faculty || !courseOfStudy || !level) {
@@ -67,22 +91,25 @@ export const createCourseForm = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
-    // Check if already submitted for this faculty/courseOfStudy/level/academic year/semester
-    const existingForm = await CourseForm.findOne({
-      faculty,
-      courseOfStudy,
-      level,
-      academicYear,
-      semester: normalizedSemester,
-      status: { $in: ['submitted', 'approved'] },
-    });
-
-    if (existingForm) {
-      res.status(400).json({
-        success: false,
-        message: 'A submitted course form already exists for this level and department in this academic year and semester',
+    // Check if already submitted for this level/department (only for non-student forms)
+    if (!studentId) {
+      const existingForm = await CourseForm.findOne({
+        faculty,
+        courseOfStudy,
+        level,
+        academicYear,
+        semester: normalizedSemester,
+        studentId: null,
+        status: { $in: ['submitted', 'approved'] },
       });
-      return;
+
+      if (existingForm) {
+        res.status(400).json({
+          success: false,
+          message: 'A submitted course form already exists for this level and department in this academic year and semester',
+        });
+        return;
+      }
     }
 
     // Normalize courses: trim and uppercase course codes
@@ -95,28 +122,52 @@ export const createCourseForm = async (req: AuthRequest, res: Response): Promise
       creditUnits: course.creditUnits,
     }));
 
-    // Find or create/update course form for this faculty/courseOfStudy/level/semester/year
+    // If creating a student-specific form, merge with department-level courses
+    let finalCourses = normalizedCourses;
+    if (studentId) {
+      // Fetch the department-level form for this faculty/courseOfStudy/level/academicYear/semester
+      const departmentForm = await CourseForm.findOne({
+        faculty,
+        courseOfStudy,
+        level,
+        academicYear,
+        semester: normalizedSemester,
+        studentId: null,
+        status: { $in: ['draft', 'submitted', 'approved'] },
+      });
+
+      if (departmentForm && departmentForm.courses.length > 0) {
+        // Merge: start with department courses, then add any new courses not already in the list
+        const deptCourseCodes = new Set(departmentForm.courses.map(c => c.courseCode.toUpperCase()));
+        const newCourses = normalizedCourses.filter((c: any) => !deptCourseCodes.has(c.courseCode.toUpperCase()));
+        finalCourses = [...departmentForm.courses, ...newCourses];
+      }
+    }
+
+    // Find or create/update course form
     let courseForm = await CourseForm.findOne({
       faculty,
       courseOfStudy,
       level,
       academicYear,
       semester: normalizedSemester,
+      studentId: studentId || null,
       status: 'draft',
     });
 
     if (!courseForm) {
       courseForm = new CourseForm({
-        courses: normalizedCourses,
+        courses: finalCourses,
         academicYear,
         semester: normalizedSemester,
         faculty,
         courseOfStudy,
         level,
+        studentId: studentId || undefined,
         notes,
       });
     } else {
-      courseForm.courses = normalizedCourses;
+      courseForm.courses = finalCourses;
       courseForm.notes = notes;
     }
 
@@ -152,6 +203,30 @@ export const updateCourseForm = async (req: AuthRequest, res: Response): Promise
       return;
     }
 
+    // Permission check for student-specific forms
+    if (courseForm.studentId) {
+      const student = await User.findById(courseForm.studentId);
+      if (!student) {
+        res.status(404).json({ success: false, message: 'Associated student not found' });
+        return;
+      }
+
+      // Level adviser must be in student's scope
+      if (req.user.role === 'level_adviser' && 
+          (req.user.faculty !== student.faculty || 
+           req.user.courseOfStudy !== student.courseOfStudy || 
+           req.user.level !== student.level)) {
+        res.status(403).json({ success: false, message: 'You can only manage forms for students in your level/department' });
+        return;
+      }
+
+      // Class rep must be the student
+      if (req.user.role === 'class_rep' && req.user._id.toString() !== courseForm.studentId.toString()) {
+        res.status(403).json({ success: false, message: 'Class reps can only edit their own course form' });
+        return;
+      }
+    }
+
     if (courseForm.status === 'rejected') {
       res.status(400).json({ success: false, message: 'Rejected forms cannot be updated' });
       return;
@@ -175,7 +250,29 @@ export const updateCourseForm = async (req: AuthRequest, res: Response): Promise
         creditUnits: course.creditUnits,
       }));
 
-      courseForm.courses = normalizedCourses;
+      // If this is a student-specific form, merge with department-level courses
+      let finalCourses = normalizedCourses;
+      if (courseForm.studentId) {
+        // Fetch the department-level form for this faculty/courseOfStudy/level/academicYear/semester
+        const departmentForm = await CourseForm.findOne({
+          faculty: courseForm.faculty,
+          courseOfStudy: courseForm.courseOfStudy,
+          level: courseForm.level,
+          academicYear: courseForm.academicYear,
+          semester: courseForm.semester,
+          studentId: null,
+          status: { $in: ['draft', 'submitted', 'approved'] },
+        });
+
+        if (departmentForm && departmentForm.courses.length > 0) {
+          // Merge: start with department courses, then add any new courses not already in the list
+          const deptCourseCodes = new Set(departmentForm.courses.map(c => c.courseCode.toUpperCase()));
+          const newCourses = normalizedCourses.filter((c: any) => !deptCourseCodes.has(c.courseCode.toUpperCase()));
+          finalCourses = [...departmentForm.courses, ...newCourses];
+        }
+      }
+
+      courseForm.courses = finalCourses;
     }
 
     if (notes) {
@@ -242,11 +339,50 @@ export const getCourseForms = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const { faculty, courseOfStudy, level, academicYear, semester, status } = req.query;
+    const { faculty, courseOfStudy, level, academicYear, semester, status, studentId } = req.query;
 
     let filter: any = {};
 
-    // Add filters if provided
+    // If filtering by specific studentId, validate permissions first
+    if (studentId) {
+      const targetStudent = await User.findById(studentId);
+      if (!targetStudent) {
+        res.status(404).json({ success: false, message: 'Student not found' });
+        return;
+      }
+
+      // Permission check: only the student, their level adviser, or their class rep can see their forms
+      if (req.user.role === 'student' && req.user._id.toString() !== studentId) {
+        res.status(403).json({ success: false, message: 'You can only view your own course forms' });
+        return;
+      }
+
+      if (req.user.role === 'class_rep' && req.user._id.toString() !== studentId) {
+        res.status(403).json({ success: false, message: 'Class reps can only view their own course forms' });
+        return;
+      }
+
+      if (req.user.role === 'level_adviser' && 
+          (req.user.faculty !== targetStudent.faculty || 
+           req.user.courseOfStudy !== targetStudent.courseOfStudy || 
+           req.user.level !== targetStudent.level)) {
+        res.status(403).json({ success: false, message: 'You can only view forms for students in your level/department' });
+        return;
+      }
+
+      filter.studentId = studentId;
+    } else {
+      if (req.user.role === 'level_adviser') {
+        // Level advisers should see both department-level and student-specific forms
+        // for their faculty/department/level.
+      } else {
+        // If no studentId specified, only return department-level forms (where studentId is null)
+        // This is the default behavior for viewing course forms by students and class reps.
+        filter.studentId = null;
+      }
+    }
+
+    // Add other filters if provided
     if (faculty) filter.faculty = faculty;
     if (courseOfStudy) filter.courseOfStudy = courseOfStudy;
     if (level) filter.level = level;
@@ -254,7 +390,7 @@ export const getCourseForms = async (req: AuthRequest, res: Response): Promise<v
     if (semester) filter.semester = (semester as string).toLowerCase();
     if (status) filter.status = status;
 
-    if (req.user.role === 'student') {
+    if (req.user.role === 'student' && !studentId) {
       const student = await User.findById(req.user._id).select('faculty level courseOfStudy');
       if (student) {
         filter.faculty = student.faculty;
@@ -262,14 +398,14 @@ export const getCourseForms = async (req: AuthRequest, res: Response): Promise<v
         filter.courseOfStudy = student.courseOfStudy;
         if (!status) filter.status = 'approved';
       }
-    } else if (req.user.role === 'class_rep') {
-      // Class reps are students - they only see approved forms for their faculty/level/courseOfStudy
+    } else if (req.user.role === 'class_rep' && !studentId) {
+      // Class reps see approved forms for their faculty/level/courseOfStudy (only department-level)
       if (!faculty && req.user.faculty) filter.faculty = req.user.faculty;
       if (!courseOfStudy && req.user.courseOfStudy) filter.courseOfStudy = req.user.courseOfStudy;
       if (!level && req.user.level) filter.level = req.user.level;
-      if (!status) filter.status = 'approved'; // Only approved forms for class reps
-    } else if (req.user.role === 'level_adviser') {
-      // Level advisers see all forms for their faculty
+      if (!status) filter.status = 'approved';
+    } else if (req.user.role === 'level_adviser' && !studentId) {
+      // Level advisers see all department-level forms for their faculty
       if (!faculty && req.user.faculty) filter.faculty = req.user.faculty;
       if (!courseOfStudy && req.user.courseOfStudy) filter.courseOfStudy = req.user.courseOfStudy;
       if (!level && req.user.level) filter.level = req.user.level;
@@ -277,6 +413,7 @@ export const getCourseForms = async (req: AuthRequest, res: Response): Promise<v
 
     const forms = await CourseForm.find(filter)
       .populate('approvedBy', 'fullName email')
+      .populate('studentId', 'fullName email matricNumber')
       .sort({ createdAt: -1 });
 
     res.json({
@@ -480,6 +617,65 @@ export const deleteCourseForm = async (req: AuthRequest, res: Response): Promise
     res.json({
       success: true,
       message: 'Course form deleted successfully',
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get course forms by student ID (for level adviser/class rep to edit student forms)
+ */
+export const getCourseFormsByStudent = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Not authorized' });
+      return;
+    }
+
+    const { studentId } = req.params;
+    const { academicYear, semester } = req.query;
+
+    // Verify student exists
+    const student = await User.findById(studentId);
+    if (!student) {
+      res.status(404).json({ success: false, message: 'Student not found' });
+      return;
+    }
+
+    // Permission check
+    if (req.user.role === 'level_adviser' && 
+        (req.user.faculty !== student.faculty || 
+         req.user.courseOfStudy !== student.courseOfStudy || 
+         req.user.level !== student.level)) {
+      res.status(403).json({ success: false, message: 'You can only view forms for students in your level/department' });
+      return;
+    }
+
+    if (req.user.role === 'class_rep' && req.user._id.toString() !== studentId) {
+      res.status(403).json({ success: false, message: 'You can only view your own course forms' });
+      return;
+    }
+
+    if (req.user.role === 'student' && req.user._id.toString() !== studentId) {
+      res.status(403).json({ success: false, message: 'You can only view your own course forms' });
+      return;
+    }
+
+    let filter: any = { studentId };
+
+    if (academicYear) filter.academicYear = academicYear;
+    if (semester) filter.semester = (semester as string).toLowerCase();
+
+    const forms = await CourseForm.find(filter)
+      .populate('studentId', 'fullName email matricNumber')
+      .populate('approvedBy', 'fullName email')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      count: forms.length,
+      forms,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });

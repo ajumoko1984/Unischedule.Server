@@ -122,8 +122,8 @@ import { normalizeCourseCode, formatTestForStudent } from '../utils/testHelper';
  */
 export const createTest = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (!req.user || req.user.role !== 'exam_officer') {
-      res.status(403).json({ success: false, message: 'Only exam officers can create tests' });
+    if (!req.user || !['exam_officer', 'super_admin', 'class_rep'].includes(req.user.role)) {
+      res.status(403).json({ success: false, message: 'Only exam officers or class reps can create tests' });
       return;
     }
 
@@ -150,11 +150,18 @@ export const createTest = async (req: AuthRequest, res: Response): Promise<void>
       instructions,
     } = req.body;
 
+    const normalizedTestType = testType || 'written';
+
+    if (req.user.role === 'class_rep' && normalizedTestType === 'cbt') {
+      res.status(403).json({ success: false, message: 'Class reps cannot create CBT tests' });
+      return;
+    }
+
     const testScheduleDate = scheduleDate ? new Date(scheduleDate) : date ? new Date(date) : undefined;
-    const testVenue = testType === 'cbt' ? 'CBT CENTRE' : venue || location;
+    const testVenue = normalizedTestType === 'cbt' ? 'CBT CENTRE' : venue || location;
 
     // For non-CBT tests, venue/location is required
-    if (testType !== 'cbt' && !testVenue) {
+    if (normalizedTestType !== 'cbt' && !testVenue) {
       res.status(400).json({ success: false, message: 'Venue is required for non-CBT tests' });
       return;
     }
@@ -177,8 +184,9 @@ export const createTest = async (req: AuthRequest, res: Response): Promise<void>
       title,
       courseCode,
       courseTitle,
-      testType,
+      testType: normalizedTestType,
       duration,
+      totalMarks,
       scheduleDate: testScheduleDate,
       startTime,
       endTime,
@@ -186,6 +194,9 @@ export const createTest = async (req: AuthRequest, res: Response): Promise<void>
       semester,
       academicYear,
       createdBy: req.user._id,
+      students: students && students.length > 0 ? students : [],
+      invigilators,
+      instructions,
       // Store optional admin fields so notifications can target students
       faculty: faculty || req.user.faculty,
       level: level || req.user.level,
@@ -194,7 +205,7 @@ export const createTest = async (req: AuthRequest, res: Response): Promise<void>
 
     res.status(201).json({
       success: true,
-      message: `${testType.toUpperCase()} test created successfully and added to timetable`,
+      message: `${normalizedTestType.toUpperCase()} test created successfully and added to timetable`,
       test,
     });
   } catch (error: any) {
@@ -231,6 +242,16 @@ export const getMyTests = async (req: AuthRequest, res: Response): Promise<void>
       });
 
       if (!courseForm) {
+        if (req.user.role === 'class_rep') {
+          const ownTests = await Test.find({ createdBy: req.user._id })
+            .populate('createdBy', 'fullName email')
+            .populate('students', 'fullName email matricNumber')
+            .sort({ scheduleDate: -1 });
+
+          res.json({ success: true, count: ownTests.length, tests: ownTests });
+          return;
+        }
+
         res.json({ success: true, count: 0, tests: [] });
         return;
       }
@@ -249,6 +270,23 @@ export const getMyTests = async (req: AuthRequest, res: Response): Promise<void>
       );
 
       const formattedTests = matchedTests.map(formatTestForStudent);
+
+      if (req.user.role === 'class_rep') {
+        const ownTests = await Test.find({ createdBy: req.user._id })
+          .populate('createdBy', 'fullName email')
+          .populate('students', 'fullName email matricNumber')
+          .sort({ scheduleDate: -1 });
+
+        const uniqueTests = [
+          ...ownTests,
+          ...matchedTests.filter(
+            (test) => !ownTests.some((own) => own._id.toString() === test._id.toString())
+          ),
+        ];
+
+        res.json({ success: true, count: uniqueTests.length, tests: uniqueTests });
+        return;
+      }
 
       res.json({ success: true, count: formattedTests.length, tests: formattedTests });
       return;
@@ -293,6 +331,37 @@ export const getTestById = async (req: AuthRequest, res: Response): Promise<void
 
     // Check if user is the creator or super_admin
     if (test.createdBy._id.toString() !== req.user._id.toString() && req.user.role !== 'super_admin') {
+      if (['student', 'class_rep'].includes(req.user.role)) {
+        const isAssignedStudent = test.students
+          .map((studentId: any) => studentId.toString())
+          .includes(req.user._id.toString());
+
+        if (test.status === 'published' && isAssignedStudent) {
+          res.json({ success: true, test });
+          return;
+        }
+
+        const student = await User.findById(req.user._id);
+        if (!student) {
+          res.status(404).json({ success: false, message: 'Student not found' });
+          return;
+        }
+
+        const courseForm = await CourseFormModel.findOne({
+          faculty: student.faculty,
+          level: student.level,
+          status: 'approved',
+        });
+
+        if (courseForm && test.status === 'published') {
+          const allowedCourseCodes = courseForm.courses.map((c) => normalizeCourseCode(c.courseCode));
+          if (allowedCourseCodes.includes(normalizeCourseCode(test.courseCode))) {
+            res.json({ success: true, test });
+            return;
+          }
+        }
+      }
+
       res.status(403).json({ success: false, message: 'Not authorized to view this test' });
       return;
     }
@@ -602,6 +671,41 @@ export const getTestsByCourse = async (req: Request, res: Response): Promise<voi
 
     const tests = await Test.find({
       courseCode: (courseCode as string).toUpperCase(),
+      academicYear: academicYear || new Date().getFullYear().toString(),
+      status: { $in: ['published', 'active', 'closed'] },
+    })
+      .populate('createdBy', 'fullName email')
+      .sort({ scheduleDate: 1 });
+
+    res.json({
+      success: true,
+      count: tests.length,
+      tests,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getTestsByType = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { testType } = req.params;
+    const { academicYear } = req.query;
+
+    if (!testType) {
+      res.status(400).json({ success: false, message: 'Test type is required' });
+      return;
+    }
+
+    const allowedTypes = ['cbt', 'practical', 'written', 'oral'];
+    const normalizedType = (testType || '').toLowerCase();
+    if (!allowedTypes.includes(normalizedType)) {
+      res.status(400).json({ success: false, message: `Invalid test type. Allowed types: ${allowedTypes.join(', ')}` });
+      return;
+    }
+
+    const tests = await Test.find({
+      testType: normalizedType,
       academicYear: academicYear || new Date().getFullYear().toString(),
       status: { $in: ['published', 'active', 'closed'] },
     })

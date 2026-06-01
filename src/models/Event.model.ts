@@ -32,10 +32,10 @@ const eventSchema = new Schema<IEvent>(
   {
     title: { type: String, required: true },
     courseCode: { type: String, required: true, uppercase: true },
-    courseTitle: { type: String, required: true },
+    courseTitle: { type: String },
     category: {
       type: String,
-      enum: ['test', 'exam', 'assignment', 'project', 'other'],
+      enum: ['test', 'assignment', 'project', 'other'],
       required: true,
     },
     date: { type: Date, required: true },

@@ -1,6 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-export type TestType = 'cbt' | 'practical' | 'written' | 'oral';
+export type TestType = 'cbt' | 'practical' | 'written' | 'online';
 export type TestStatus = 'draft' | 'published' | 'scheduled' | 'ongoing' | 'completed';
 
 export interface ITest extends Document {
@@ -33,7 +33,7 @@ const testSchema = new Schema<ITest>(
   {
     // Core required fields (visible to students)
     courseCode: { type: String, required: true, uppercase: true, index: true },
-    courseTitle: { type: String, required: true },
+    courseTitle: { type: String },
     testType: {
       type: String,
       enum: ['cbt', 'practical', 'written', 'oral'],
