@@ -228,12 +228,19 @@ export const getMyExams = async (req: AuthRequest, res: Response): Promise<void>
         return;
       }
 
-      // Get their approved course form
-      const courseForm = await CourseFormModel.findOne({
-        faculty: student.faculty,
-        level: student.level,
+      // Check personal course form first (carry-over / custom courses), fall back to dept form
+      let courseForm = await CourseFormModel.findOne({
+        studentId: student._id,
         status: 'approved',
       });
+
+      if (!courseForm) {
+        courseForm = await CourseFormModel.findOne({
+          faculty: student.faculty,
+          level: student.level,
+          status: 'approved',
+        });
+      }
 
       if (!courseForm) {
         res.json({ success: true, count: 0, exams: [] });

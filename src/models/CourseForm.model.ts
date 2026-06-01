@@ -16,6 +16,7 @@ export interface ICourseForm extends Document {
   faculty: string;
   courseOfStudy: string; // Department / course of study
   level: string; // Level for which these courses are prescribed
+  studentId?: Schema.Types.ObjectId; // Optional: reference to specific student (for carry-over/overload cases)
   status: 'draft' | 'submitted' | 'approved' | 'rejected'; // Form status
   approvedBy?: Schema.Types.ObjectId; // Reference to admin/level adviser who approved
   approvalDate?: Date;
@@ -41,6 +42,7 @@ const courseFormSchema = new Schema<ICourseForm>(
     faculty: { type: String, required: true },
     courseOfStudy: { type: String, required: true },
     level: { type: String, required: true },
+    studentId: { type: Schema.Types.ObjectId, ref: 'User' }, // Optional: for student-specific forms
     status: {
       type: String,
       enum: ['draft', 'submitted', 'approved', 'rejected'],
@@ -53,10 +55,13 @@ const courseFormSchema = new Schema<ICourseForm>(
   { timestamps: true }
 );
 
-// Ensure one active course form per faculty/courseOfStudy/level per academic year/semester
+// Ensure one active course form per faculty/courseOfStudy/level per academic year/semester (for department-level forms)
 courseFormSchema.index(
-  { faculty: 1, courseOfStudy: 1, level: 1, academicYear: 1, semester: 1 },
-  { unique: true, sparse: true, partialFilterExpression: { status: { $in: ['submitted', 'approved'] } } }
+  { faculty: 1, courseOfStudy: 1, level: 1, academicYear: 1, semester: 1, studentId: 1 },
+  { unique: true, sparse: true, partialFilterExpression: { status: { $in: ['submitted', 'approved'] }, studentId: null } }
 );
+
+// Index for finding forms by studentId
+courseFormSchema.index({ studentId: 1, academicYear: 1, semester: 1 });
 
 export default mongoose.model<ICourseForm>('CourseForm', courseFormSchema);

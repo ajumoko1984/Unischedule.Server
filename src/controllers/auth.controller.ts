@@ -8,7 +8,7 @@ import { getFaculties, getDepartmentsByFaculty, isValidFacultyDepartment, getFac
 const generateToken = (id: string): string => {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET not configured');
-  const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
+  const expiresIn = process.env.JWT_EXPIRES_IN || '5h';
   return jwt.sign({ id }, secret, { expiresIn } as any);
 };
 

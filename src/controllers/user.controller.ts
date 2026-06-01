@@ -255,7 +255,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
     }
 
     const [totalStudents, upcomingTests, upcomingExams, recentNotifications] = await Promise.all([
-      User.countDocuments({ ...filter, role: 'student', isActive: true }),
+      User.countDocuments({ ...filter, role: { $in: ['student', 'class_rep'] }, isActive: true }),
       Event.countDocuments({ ...filter, category: 'test', status: 'upcoming' }),
       Event.countDocuments({ ...filter, category: 'exam', status: 'upcoming' }),
       Notification.find(filter).sort({ createdAt: -1 }).limit(5).populate('sentBy', 'fullName role'),
