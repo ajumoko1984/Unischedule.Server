@@ -178,6 +178,12 @@ export const createExam = async (req: AuthRequest, res: Response): Promise<void>
       }
     }
 
+    const normalizedInvigilators = Array.isArray(invigilators)
+      ? invigilators
+          .filter((name: any) => typeof name === 'string' && name.trim().length > 0)
+          .map((name: string) => name.trim())
+      : [];
+
     const exam = await Exam.create({
       title,
       courseCode,
@@ -191,6 +197,9 @@ export const createExam = async (req: AuthRequest, res: Response): Promise<void>
       semester,
       academicYear,
       createdBy: req.user._id,
+      students: Array.isArray(students) ? students : [],
+      invigilators: normalizedInvigilators,
+      instructions,
       // Store optional admin fields so notifications can target students
       faculty: faculty || req.user.faculty,
       level: level || req.user.level,
@@ -362,6 +371,8 @@ export const updateExam = async (req: AuthRequest, res: Response): Promise<void>
       semester,
       academicYear,
       status,
+      invigilators,
+      instructions,
     } = req.body;
 
     const updateScheduleDate = scheduleDate ? new Date(scheduleDate) : date ? new Date(date) : undefined;
@@ -386,6 +397,14 @@ export const updateExam = async (req: AuthRequest, res: Response): Promise<void>
     if (semester) exam.semester = semester;
     if (academicYear) exam.academicYear = academicYear;
     if (status) exam.status = status;
+    if (Array.isArray(invigilators)) {
+      exam.invigilators = invigilators
+        .filter((name: any) => typeof name === 'string' && name.trim().length > 0)
+        .map((name: string) => name.trim());
+    }
+    if (typeof instructions === 'string') {
+      exam.instructions = instructions;
+    }
 
     await exam.save();
 
