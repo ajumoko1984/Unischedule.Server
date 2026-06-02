@@ -43,6 +43,7 @@ export const formatExamForStudent = (exam: IExam) => {
     semester: exam.semester,
     academicYear: exam.academicYear,
     status: exam.status,
+    invigilators: Array.isArray(exam.invigilators) ? exam.invigilators : [],
   };
 };
 
