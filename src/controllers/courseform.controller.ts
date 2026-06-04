@@ -626,6 +626,93 @@ export const deleteCourseForm = async (req: AuthRequest, res: Response): Promise
 /**
  * Get course forms by student ID (for level adviser/class rep to edit student forms)
  */
+export const getStudentsByCourse = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Not authorized' });
+      return;
+    }
+
+    const { courseCode } = req.params;
+    const { academicYear, semester, faculty, courseOfStudy, level } = req.query;
+
+    if (!courseCode || typeof courseCode !== 'string' || courseCode.trim().length === 0) {
+      res.status(400).json({ success: false, message: 'Course code is required' });
+      return;
+    }
+
+    const normalizedCourseCode = courseCode.trim().toUpperCase();
+
+    const baseFilter: any = {
+      status: 'approved',
+      'courses.courseCode': normalizedCourseCode,
+    };
+
+    if (academicYear) baseFilter.academicYear = academicYear;
+    if (semester) baseFilter.semester = (semester as string).toLowerCase();
+    if (faculty) baseFilter.faculty = faculty;
+    if (courseOfStudy) baseFilter.courseOfStudy = courseOfStudy;
+    if (level) baseFilter.level = level;
+
+    const studentForms = await CourseForm.find({ ...baseFilter, studentId: { $ne: null } })
+      .populate('studentId', 'fullName email matricNumber faculty courseOfStudy level')
+      .lean();
+
+    const explicitStudentIds = new Set<string>();
+    const studentMap = new Map<string, any>();
+
+    studentForms.forEach((form: any) => {
+      if (form.studentId && form.studentId._id) {
+        explicitStudentIds.add(form.studentId._id.toString());
+        studentMap.set(form.studentId._id.toString(), {
+          _id: form.studentId._id,
+          fullName: form.studentId.fullName,
+          email: form.studentId.email,
+          matricNumber: form.studentId.matricNumber,
+          faculty: form.studentId.faculty,
+          courseOfStudy: form.studentId.courseOfStudy,
+          level: form.studentId.level,
+          source: 'student-specific',
+        });
+      }
+    });
+
+    const departmentForms = await CourseForm.find({ ...baseFilter, studentId: null }).lean();
+
+    for (const deptForm of departmentForms) {
+      const studentFilter: any = {
+        role: { $in: ['student', 'class_rep'] },
+        faculty: deptForm.faculty,
+        courseOfStudy: deptForm.courseOfStudy,
+        level: deptForm.level,
+      };
+
+      const groupStudents = await User.find(studentFilter).select('fullName email matricNumber faculty courseOfStudy level').lean();
+      groupStudents.forEach((student) => {
+        const studentIdString = student._id.toString();
+        if (!explicitStudentIds.has(studentIdString) && !studentMap.has(studentIdString)) {
+          studentMap.set(studentIdString, {
+            _id: student._id,
+            fullName: student.fullName,
+            email: student.email,
+            matricNumber: student.matricNumber,
+            faculty: student.faculty,
+            courseOfStudy: student.courseOfStudy,
+            level: student.level,
+            source: 'department-level',
+          });
+        }
+      });
+    }
+
+    const students = Array.from(studentMap.values());
+
+    res.json({ success: true, count: students.length, students });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const getCourseFormsByStudent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!req.user) {

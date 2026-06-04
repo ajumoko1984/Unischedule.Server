@@ -11,6 +11,7 @@ import {
   getApprovedCourseForm,
   deleteCourseForm,
   getCourseFormsByStudent,
+  getStudentsByCourse,
 } from '../controllers/courseform.controller';
 
 const router = Router();
@@ -18,6 +19,7 @@ const router = Router();
 // Student and Level Adviser routes - VIEW ONLY
 router.get('/', protect, authorize('student', 'super_admin', 'level_adviser', 'class_rep'), getCourseForms); // List course forms
 router.get('/my-approved', protect, authorize('student', 'level_adviser', 'super_admin', 'class_rep'), getApprovedCourseForm); // Get approved course form
+router.get('/course/:courseCode/students', protect, authorize('super_admin', 'level_adviser', 'class_rep', 'exam_officer'), getStudentsByCourse); // Get students doing a specific course
 router.get('/student/:studentId', protect, authorize('student', 'super_admin', 'level_adviser', 'class_rep'), getCourseFormsByStudent); // Get forms for specific student
 router.get('/:id', protect, authorize('student', 'super_admin', 'level_adviser', 'class_rep'), getCourseFormById); // View specific form
 
