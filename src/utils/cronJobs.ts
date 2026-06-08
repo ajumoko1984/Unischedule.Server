@@ -5,6 +5,7 @@ import Notification from '../models/Notification.model';
 import StudyPlan from '../models/StudyPlan.model';
 import Assignment from '../models/Assignment.model';
 import { sendEventReminderEmail, sendAnnouncementEmail } from './mailer';
+import { sendBulkSms } from './sms';
 
 export const startCronJobs = (): void => {
   // 8:00 PM — send reminder for tomorrow's tests/exams
@@ -59,12 +60,13 @@ async function sendTomorrowEventReminders(): Promise<void> {
         courseOfStudy: event.courseOfStudy,
         role: 'student',
         isActive: true,
-      }).select('email');
+        }).select('email phone');
 
       const systemUser = await User.findOne({ role: 'super_admin' });
       if (!systemUser) continue;
 
-      const recipientEmails = students.map(s => s.email);
+      const recipientEmails = students.map(s => s.email).filter(Boolean);
+      const recipientPhones = students.map(s => (s as any).phone).filter(Boolean);
       if (!recipientEmails.length) continue;
 
       const dateStr = event.date.toLocaleDateString('en-NG', {
@@ -85,12 +87,19 @@ async function sendTomorrowEventReminders(): Promise<void> {
         courseOfStudy: event.courseOfStudy,
       });
 
+      if (recipientPhones.length > 0) {
+        const smsText = `Reminder: ${event.title} on ${dateStr} at ${event.startTime} — Venue: ${event.venue}`;
+        await sendBulkSms(recipientPhones, smsText);
+      }
+
       await Notification.create({
         type: 'reminder',
         subject: `Reminder: ${event.title} – Tomorrow`,
         message: `Automated reminder for ${event.category}: ${event.courseCode}`,
         recipients: recipientEmails,
         recipientCount: recipientEmails.length,
+        smsRecipients: recipientPhones,
+        smsRecipientCount: recipientPhones.length,
         sentBy: systemUser._id,
         faculty: event.faculty,
         level: event.level,
@@ -118,7 +127,7 @@ async function sendStudySessionReminders(): Promise<void> {
     const inOneHour = new Date(now.getTime() + 60 * 60 * 1000);
     const inOneHourEnd = new Date(inOneHour.getTime() + 60 * 1000); // 1-minute window
 
-    const plans = await StudyPlan.find({}).populate('owner', 'email fullName isActive');
+    const plans = await StudyPlan.find({}).populate('owner', 'email fullName isActive phone');
 
     for (const plan of plans) {
       const owner = plan.owner as any;
@@ -144,6 +153,11 @@ async function sendStudySessionReminders(): Promise<void> {
           courseOfStudy: plan.courseOfStudy,
         });
 
+        if ((owner as any).phone) {
+          const sms = `Study reminder: ${task.courseCode} starts in 1 hour at ${new Date(task.scheduledAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })}`;
+          await sendBulkSms([(owner as any).phone], sms);
+        }
+
         task.reminderSent = true;
         console.log(`✅ Study reminder sent to ${owner.email} for ${task.courseCode}`);
       }
@@ -168,7 +182,7 @@ async function sendAssignmentDeadlineReminders(): Promise<void> {
       deadline: { $gte: tomorrow, $lt: dayAfter },
       status: { $in: ['pending', 'in_progress'] },
       reminderSent: false,
-    }).populate('owner', 'email fullName isActive');
+    }).populate('owner', 'email fullName isActive phone');
 
     for (const assignment of dueTomorrow) {
       const owner = assignment.owner as any;
@@ -182,6 +196,11 @@ async function sendAssignmentDeadlineReminders(): Promise<void> {
         level: assignment.level,
         courseOfStudy: assignment.courseOfStudy,
       });
+
+      if (owner.phone) {
+        const sms = `Assignment due tomorrow: ${assignment.courseCode} — ${assignment.title}. Deadline: ${assignment.deadline.toLocaleDateString('en-NG')}`;
+        await sendBulkSms([owner.phone], sms);
+      }
 
       assignment.reminderSent = true;
       await assignment.save();

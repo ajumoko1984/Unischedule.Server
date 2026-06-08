@@ -17,6 +17,7 @@ export interface IExam extends Document {
   status: ExamStatus;
   createdBy: mongoose.Types.ObjectId; // exam_officer who created it
   students: mongoose.Types.ObjectId[]; // student IDs taking this exam
+  studentPopulation?: number;
   // Optional legacy/admin fields (not displayed to students)
   title?: string;
   duration?: number; // in minutes
@@ -54,6 +55,7 @@ const examSchema = new Schema<IExam>(
     },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     students: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    studentPopulation: { type: Number, min: 0 },
     // Optional legacy/admin fields (not required, not displayed to students)
     title: { type: String },
     duration: { type: Number },

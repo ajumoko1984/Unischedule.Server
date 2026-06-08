@@ -3,6 +3,7 @@ import Timetable from '../models/Timetable.model';
 import User from '../models/User.model';
 import Notification from '../models/Notification.model';
 import { sendVenueChangeEmail } from '../utils/mailer';
+import { sendBulkSms } from '../utils/sms';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 export const getTimetable = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -86,9 +87,10 @@ export const updateVenue = async (req: AuthRequest, res: Response): Promise<void
       courseOfStudy: timetable.courseOfStudy,
       role: 'student',
       isActive: true,
-    }).select('email');
+    }).select('email phone');
 
-    const emails = students.map(s => s.email);
+    const emails = students.map(s => s.email).filter(Boolean);
+    const phones = students.map(s => (s as any).phone).filter(Boolean);
 
     if (emails.length > 0) {
       await sendVenueChangeEmail(emails, {
@@ -105,12 +107,19 @@ export const updateVenue = async (req: AuthRequest, res: Response): Promise<void
         courseOfStudy: timetable.courseOfStudy,
       });
 
+      if (phones.length > 0) {
+        const sms = `Venue changed for ${slot.courseCode}: ${oldVenue} → ${newVenue} on ${slot.day} at ${slot.startTime}`;
+        await sendBulkSms(phones, sms);
+      }
+
       await Notification.create({
         type: 'venue_change',
         subject: `Venue Change: ${slot.courseCode} – ${slot.day}`,
         message: `Venue changed from ${oldVenue} to ${newVenue}`,
         recipients: emails,
         recipientCount: emails.length,
+        smsRecipients: phones,
+        smsRecipientCount: phones.length,
         sentBy: req.user._id,
         faculty: timetable.faculty,
         level: timetable.level,

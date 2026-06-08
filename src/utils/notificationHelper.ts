@@ -62,3 +62,45 @@ export const getNotificationRecipientEmails = async (scope: NotificationScope): 
 
   return Array.from(emails);
 };
+
+export const getNotificationRecipientPhones = async (scope: NotificationScope): Promise<string[]> => {
+  const phones = new Set<string>();
+
+  if (scope.courseCode) {
+    const formFilter: any = {
+      'courses.courseCode': scope.courseCode,
+      status: 'approved',
+    };
+    if (scope.faculty) formFilter.faculty = { $regex: new RegExp(`^${scope.faculty}$`, 'i') };
+    if (scope.level) formFilter.level = { $regex: new RegExp(`^${scope.level}$`, 'i') };
+    if (scope.courseOfStudy) formFilter.courseOfStudy = { $regex: new RegExp(`^${scope.courseOfStudy}$`, 'i') };
+
+    const courseForms = await CourseFormModel.find(formFilter).select('faculty level courseOfStudy');
+    if (courseForms.length === 0) return [];
+
+    for (const form of courseForms) {
+      const students = await User.find({
+        role: 'student',
+        isActive: true,
+        faculty: { $regex: new RegExp(`^${form.faculty}$`, 'i') },
+        level: { $regex: new RegExp(`^${form.level}$`, 'i') },
+        courseOfStudy: { $regex: new RegExp(`^${form.courseOfStudy}$`, 'i') },
+      }).select('phone');
+
+      students.forEach(s => { if (s.phone) phones.add(s.phone); });
+    }
+  } else {
+    const filter: any = {
+      role: 'student',
+      isActive: true,
+    };
+    if (scope.faculty) filter.faculty = { $regex: new RegExp(`^${scope.faculty}$`, 'i') };
+    if (scope.level) filter.level = { $regex: new RegExp(`^${scope.level}$`, 'i') };
+    if (scope.courseOfStudy) filter.courseOfStudy = { $regex: new RegExp(`^${scope.courseOfStudy}$`, 'i') };
+
+    const students = await User.find(filter).select('phone');
+    students.forEach(s => { if (s.phone) phones.add(s.phone); });
+  }
+
+  return Array.from(phones);
+};

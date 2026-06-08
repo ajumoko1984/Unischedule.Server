@@ -8,6 +8,9 @@ export interface INotification extends Document {
   message: string;
   recipients: string[]; // email addresses
   recipientCount: number;
+  smsRecipients?: string[]; // phone numbers
+  smsRecipientCount?: number;
+  failedSmsRecipients?: string[];
   sentBy: mongoose.Types.ObjectId;
   faculty: string;
   level?: string;
@@ -30,7 +33,9 @@ const notificationSchema = new Schema<INotification>(
     subject: { type: String, required: true },
     message: { type: String, required: true },
     recipients: [{ type: String }],
+    smsRecipients: [{ type: String }],
     recipientCount: { type: Number, default: 0 },
+    smsRecipientCount: { type: Number, default: 0 },
     sentBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     faculty: { type: String, required: true },
     level: { type: String },
@@ -44,6 +49,7 @@ const notificationSchema = new Schema<INotification>(
       default: 'pending',
     },
     failedRecipients: [{ type: String }],
+    failedSmsRecipients: [{ type: String }],
   },
   { timestamps: true }
 );

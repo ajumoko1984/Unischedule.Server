@@ -3,7 +3,8 @@ import Notification from '../models/Notification.model';
 import User from '../models/User.model';
 import { sendAnnouncementEmail } from '../utils/mailer';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { getNotificationRecipientEmails, resolveNotificationScope } from '../utils/notificationHelper';
+import { getNotificationRecipientEmails, getNotificationRecipientPhones, resolveNotificationScope } from '../utils/notificationHelper';
+import { sendBulkSms } from '../utils/sms';
 
 const normalizeNotificationType = (type?: string) => {
   const normalized = type ? type.toString().trim().toLowerCase() : '';
@@ -50,6 +51,7 @@ export const sendAnnouncement = async (req: AuthRequest, res: Response): Promise
 
     const scope = resolveNotificationScope(req);
     const emails = await getNotificationRecipientEmails(scope);
+    const phones = await getNotificationRecipientPhones(scope);
 
     if (emails.length > 0) {
       await sendAnnouncementEmail(emails, {
@@ -62,18 +64,25 @@ export const sendAnnouncement = async (req: AuthRequest, res: Response): Promise
       });
     }
 
+    if (phones.length > 0) {
+      const smsText = `${subject}\n\n${message}`;
+      await sendBulkSms(phones, smsText);
+    }
+
     const notification = await Notification.create({
       type: 'announcement',
       subject,
       message,
       recipients: emails,
       recipientCount: emails.length,
+      smsRecipients: phones,
+      smsRecipientCount: phones.length,
       sentBy: req.user._id,
       faculty: scope.faculty || req.user.faculty || 'University',
       level: scope.level,
       courseOfStudy: scope.courseOfStudy,
       isAutomatic: false,
-      deliveryStatus: emails.length > 0 ? 'sent' : 'pending',
+      deliveryStatus: (emails.length > 0 || phones.length > 0) ? 'sent' : 'pending',
     });
 
     res.status(201).json({ success: true, data: notification, message: `Announcement sent to ${emails.length} student${emails.length !== 1 ? 's' : ''}` });
@@ -94,6 +103,7 @@ export const sendCourseNotification = async (req: AuthRequest, res: Response): P
 
     const scope = resolveNotificationScope(req);
     const emails = await getNotificationRecipientEmails(scope);
+    const phones = await getNotificationRecipientPhones(scope);
 
     if (emails.length > 0) {
       await sendAnnouncementEmail(emails, {
@@ -106,18 +116,25 @@ export const sendCourseNotification = async (req: AuthRequest, res: Response): P
       });
     }
 
+    if (phones.length > 0) {
+      const smsText = `${subject}\n\n${message}`;
+      await sendBulkSms(phones, smsText);
+    }
+
     const notification = await Notification.create({
       type: normalizeNotificationType(type),
       subject,
       message,
       recipients: emails,
       recipientCount: emails.length,
+      smsRecipients: phones,
+      smsRecipientCount: phones.length,
       sentBy: req.user._id,
       faculty: scope.faculty || req.user.faculty || 'University',
       level: scope.level,
       courseOfStudy: scope.courseOfStudy,
       isAutomatic: false,
-      deliveryStatus: emails.length > 0 ? 'sent' : 'pending',
+      deliveryStatus: (emails.length > 0 || phones.length > 0) ? 'sent' : 'pending',
     });
 
     res.status(201).json({ success: true, data: notification, message: `Course notification sent to ${emails.length} student${emails.length !== 1 ? 's' : ''}` });
@@ -149,6 +166,7 @@ export const sendTimetableNotification = async (req: AuthRequest, res: Response)
 
     const scope = resolveNotificationScope(req);
     const emails = await getNotificationRecipientEmails(scope);
+    const phones = await getNotificationRecipientPhones(scope);
 
     if (emails.length > 0) {
       await sendAnnouncementEmail(emails, {
@@ -161,18 +179,25 @@ export const sendTimetableNotification = async (req: AuthRequest, res: Response)
       });
     }
 
+    if (phones.length > 0) {
+      const smsText = `${subject}\n\n${message}`;
+      await sendBulkSms(phones, smsText);
+    }
+
     await Notification.create({
       type: normalizeNotificationType(type) || 'reminder',
       subject,
       message,
       recipients: emails,
       recipientCount: emails.length,
+      smsRecipients: phones,
+      smsRecipientCount: phones.length,
       sentBy: req.user._id,
       faculty: scope.faculty || req.user.faculty || 'University',
       level: scope.level,
       courseOfStudy: scope.courseOfStudy,
       isAutomatic: false,
-      deliveryStatus: emails.length > 0 ? 'sent' : 'pending',
+      deliveryStatus: (emails.length > 0 || phones.length > 0) ? 'sent' : 'pending',
     });
 
     res.status(201).json({
