@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-export type UserRole = 'super_admin' | 'level_adviser' | 'exam_officer' | 'class_rep' | 'student';
+export type UserRole = 'super_admin' | 'level_adviser' | 'exam_officer' | 'class_rep' | 'lecturer' | 'student';
 
 export interface IUser extends Document {
   fullName: string;
@@ -20,6 +20,7 @@ export interface IUser extends Document {
   comparePassword(candidatePassword: string): Promise<boolean>;
   resetPasswordToken?: String;
   resetPasswordExpire?: Date;
+  phone?: string;
 }
 
 const userSchema = new Schema<IUser>(
@@ -29,7 +30,7 @@ const userSchema = new Schema<IUser>(
     password: { type: String, required: true, minlength: 6 },
     role: {
       type: String,
-      enum: ['super_admin', 'level_adviser', 'exam_officer', 'class_rep', 'student'],
+      enum: ['super_admin', 'level_adviser', 'exam_officer', 'class_rep', 'lecturer', 'student'],
       default: 'student',
     },
     faculty: { type: String },
@@ -37,6 +38,7 @@ const userSchema = new Schema<IUser>(
     level: { type: String}, // "100", "200", "300", "400"
     courseOfStudy: { type: String},
     matricNumber: { type: String, sparse: true },
+    phone: { type: String },
     levelAdviserUserId: { type: String },
     isActive: { type: Boolean, default: true },
     resetPasswordToken: { type: String },

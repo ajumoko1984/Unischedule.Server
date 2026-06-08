@@ -3,20 +3,23 @@ import Test, { ITest } from '../models/Test.model';
 import User from '../models/User.model';
 import Notification from '../models/Notification.model';
 import { sendEventReminderEmail } from '../utils/mailer';
+import { sendBulkSms } from '../utils/sms';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 // Helper to send test notifications and create Notification record
 const sendTestNotification = async (test: ITest, senderId: any, opts: { reason?: string; action?: 'published' | 'updated' } = {}) => {
   try {
     let recipientEmails: string[] = [];
+    let recipientPhones: string[] = [];
     let notificationFaculty = test.faculty;
     let notificationLevel = test.level;
     let notificationCourseOfStudy = test.courseOfStudy;
 
     if (test.students && test.students.length > 0) {
       // If specific students are assigned to this test, send to them
-      const students = await User.find({ _id: { $in: test.students }, role: 'student', isActive: true }).select('email faculty level courseOfStudy');
+      const students = await User.find({ _id: { $in: test.students }, role: 'student', isActive: true }).select('email phone faculty level courseOfStudy');
       recipientEmails = students.map(s => s.email);
+      recipientPhones = students.map(s => (s as any).phone).filter(Boolean);
       // Use faculty/level from first student if not set in test
       if (students.length > 0 && !notificationFaculty) {
         notificationFaculty = students[0].faculty;
@@ -50,6 +53,7 @@ const sendTestNotification = async (test: ITest, senderId: any, opts: { reason?:
 
       // Find students in all target groups (case-insensitive, trimmed matching)
       const studentEmails = new Set<string>();
+      const studentPhones = new Set<string>();
 
       const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -59,11 +63,15 @@ const sendTestNotification = async (test: ITest, senderId: any, opts: { reason?:
         if (group.level) q.level = { $regex: new RegExp(`^${escapeRegex((group.level || '').trim())}$`, 'i') };
         if (group.courseOfStudy) q.courseOfStudy = { $regex: new RegExp(`^${escapeRegex((group.courseOfStudy || '').trim())}$`, 'i') };
 
-        const students = await User.find(q).select('email');
-        students.forEach(s => studentEmails.add(s.email));
+        const students = await User.find(q).select('email phone');
+        students.forEach(s => {
+          if (s.email) studentEmails.add(s.email);
+          if ((s as any).phone) studentPhones.add((s as any).phone);
+        });
       }
 
       recipientEmails = Array.from(studentEmails);
+      recipientPhones = Array.from(studentPhones);
       
       // Use first course form's faculty info for notification
       if (courseForms.length > 0) {
@@ -101,6 +109,8 @@ const sendTestNotification = async (test: ITest, senderId: any, opts: { reason?:
       message: `${opts.action === 'updated' ? 'A test was updated' : 'A test has been announced'}: ${test.courseTitle || test.title}` + (opts.reason ? ` — ${opts.reason}` : ''),
       recipients: recipientEmails,
       recipientCount: recipientEmails.length,
+      smsRecipients: recipientPhones || [],
+      smsRecipientCount: recipientPhones ? recipientPhones.length : 0,
       sentBy: senderId,
       faculty: notificationFaculty,
       level: notificationLevel,
@@ -109,6 +119,10 @@ const sendTestNotification = async (test: ITest, senderId: any, opts: { reason?:
       isAutomatic: true,
       deliveryStatus: 'sent',
     });
+    if (recipientPhones && recipientPhones.length > 0) {
+      const smsText = `${opts.action === 'updated' ? 'Test updated' : 'Test announced'}: ${test.courseCode || test.title} — ${test.scheduleDate ? test.scheduleDate.toDateString() : ''} ${test.startTime || ''}`;
+      await sendBulkSms(recipientPhones, smsText);
+    }
   } catch (err) {
     console.error('sendTestNotification error', err);
   }

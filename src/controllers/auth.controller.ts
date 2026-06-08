@@ -471,7 +471,7 @@ export const createUser = async (req: Request & { user?: IUser }, res: Response)
     }
 
     // Validate role
-    const validRoles: UserRole[] = ['super_admin', 'level_adviser', 'exam_officer', 'class_rep', 'student'];
+    const validRoles: UserRole[] = ['super_admin', 'level_adviser', 'exam_officer', 'class_rep', 'lecturer', 'student'];
     if (!validRoles.includes(role)) {
       res.status(400).json({ 
         success: false, 
@@ -512,6 +512,17 @@ export const createUser = async (req: Request & { user?: IUser }, res: Response)
         res.status(400).json({ 
           success: false, 
           message: 'Faculty ID, level, and course of study are required for this role' 
+        });
+        return;
+      }
+    }
+
+    // For lecturer: require facultyId so they can be assigned as invigilators/supervisors
+    if (role === 'lecturer') {
+      if (!facultyId) {
+        res.status(400).json({ 
+          success: false, 
+          message: 'Faculty ID is required for Lecturer role' 
         });
         return;
       }
@@ -572,8 +583,8 @@ export const createUser = async (req: Request & { user?: IUser }, res: Response)
       role,
       faculty: facultyName || undefined,
       facultyId,
-      level: role === 'exam_officer' ? undefined : level,
-      courseOfStudy: role === 'exam_officer' ? undefined : courseOfStudy,
+      level: role === 'exam_officer' || role === 'lecturer' ? undefined : level,
+      courseOfStudy: role === 'exam_officer' || role === 'lecturer' ? undefined : courseOfStudy,
       matricNumber,
     });
 

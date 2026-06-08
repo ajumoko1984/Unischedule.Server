@@ -3,20 +3,23 @@ import Exam, { IExam } from '../models/Exam.model';
 import User from '../models/User.model';
 import Notification from '../models/Notification.model';
 import { sendEventReminderEmail } from '../utils/mailer';
+import { sendBulkSms } from '../utils/sms';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 // Helper to send exam notifications and create Notification record
 const sendExamNotification = async (exam: IExam, senderId: any, opts: { reason?: string; action?: 'published' | 'updated' } = {}) => {
   try {
     let recipientEmails: string[] = [];
+    let recipientPhones: string[] = [];
     let notificationFaculty = exam.faculty;
     let notificationLevel = exam.level;
     let notificationCourseOfStudy = exam.courseOfStudy;
 
     if (exam.students && exam.students.length > 0) {
       // If specific students are assigned to this exam, send to them
-      const students = await User.find({ _id: { $in: exam.students }, role: 'student', isActive: true }).select('email faculty level courseOfStudy');
+      const students = await User.find({ _id: { $in: exam.students }, role: 'student', isActive: true }).select('email phone faculty level courseOfStudy');
       recipientEmails = students.map(s => s.email);
+      recipientPhones = students.map(s => (s as any).phone).filter(Boolean);
       // Use faculty/level from first student if not set in exam
       if (students.length > 0 && !notificationFaculty) {
         notificationFaculty = students[0].faculty;
@@ -24,53 +27,8 @@ const sendExamNotification = async (exam: IExam, senderId: any, opts: { reason?:
         notificationCourseOfStudy = students[0].courseOfStudy;
       }
     } else {
-      // Find approved course forms that contain this course code and match exam scope if available
-      const normCodeForLookup = exam.courseCode.toUpperCase().trim();
-      const courseFilter: any = {
-        'courses.courseCode': normCodeForLookup,
-        status: 'approved',
-      };
-      if (exam.faculty) courseFilter.faculty = exam.faculty;
-      if (exam.level) courseFilter.level = exam.level;
-      if (exam.courseOfStudy) courseFilter.courseOfStudy = exam.courseOfStudy;
-
-      const courseForms = await CourseFormModel.find(courseFilter);
-
-      if (courseForms.length === 0) {
-        console.warn(`No approved course forms found for course code: ${exam.courseCode}`);
-        return; // Skip notification if no course forms have this course
-      }
-
-      // Collect all unique faculty/level/courseOfStudy combinations
-      const targetGroups = courseForms.map(cf => ({
-        faculty: cf.faculty,
-        level: cf.level,
-        courseOfStudy: cf.courseOfStudy,
-      }));
-
-      // Find students in all target groups (case-insensitive, trimmed matching)
-      const studentEmails = new Set<string>();
-
-      const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-      for (const group of targetGroups) {
-        const q: any = { role: 'student', isActive: true };
-        if (group.faculty) q.faculty = { $regex: new RegExp(`^${escapeRegex((group.faculty || '').trim())}$`, 'i') };
-        if (group.level) q.level = { $regex: new RegExp(`^${escapeRegex((group.level || '').trim())}$`, 'i') };
-        if (group.courseOfStudy) q.courseOfStudy = { $regex: new RegExp(`^${escapeRegex((group.courseOfStudy || '').trim())}$`, 'i') };
-
-        const students = await User.find(q).select('email');
-        students.forEach(s => studentEmails.add(s.email));
-      }
-
-      recipientEmails = Array.from(studentEmails);
-      
-      // Use first course form's faculty info for notification
-      if (courseForms.length > 0) {
-        notificationFaculty = courseForms[0].faculty;
-        notificationLevel = courseForms[0].level;
-        notificationCourseOfStudy = courseForms[0].courseOfStudy;
-      }
+      console.warn(`Exam ${exam._id} has no student list; notifications require explicit students`);
+      return;
     }
 
     if (recipientEmails.length === 0) return;
@@ -101,6 +59,8 @@ const sendExamNotification = async (exam: IExam, senderId: any, opts: { reason?:
       message: `${opts.action === 'updated' ? 'An exam was updated' : 'An exam has been announced'}: ${exam.courseTitle || exam.title}` + (opts.reason ? ` — ${opts.reason}` : ''),
       recipients: recipientEmails,
       recipientCount: recipientEmails.length,
+      smsRecipients: recipientPhones,
+      smsRecipientCount: recipientPhones.length,
       sentBy: senderId,
       faculty: notificationFaculty,
       level: notificationLevel,
@@ -109,6 +69,11 @@ const sendExamNotification = async (exam: IExam, senderId: any, opts: { reason?:
       isAutomatic: true,
       deliveryStatus: 'sent',
     });
+    // send SMS if we collected any
+    if (recipientPhones.length > 0) {
+      const smsText = `${opts.action === 'updated' ? 'Exam updated' : 'Exam announced'}: ${exam.courseCode || exam.title} — ${exam.scheduleDate ? exam.scheduleDate.toDateString() : ''} ${exam.startTime || ''}`;
+      await sendBulkSms(recipientPhones, smsText);
+    }
   } catch (err) {
     console.error('sendExamNotification error', err);
   }
@@ -151,9 +116,19 @@ export const createExam = async (req: AuthRequest, res: Response): Promise<void>
       semester,
       academicYear,
       students,
+      studentPopulation,
       invigilators,
       instructions,
     } = req.body;
+
+    const population = studentPopulation !== undefined && studentPopulation !== null
+      ? Number(studentPopulation)
+      : undefined;
+
+    if (population !== undefined && (Number.isNaN(population) || !Number.isInteger(population) || population < 0)) {
+      res.status(400).json({ success: false, message: 'studentPopulation must be a non-negative integer' });
+      return;
+    }
 
     const examScheduleDate = scheduleDate ? new Date(scheduleDate) : date ? new Date(date) : undefined;
     const examVenue = examType === 'cbt' ? 'CBT CENTRE' : venue || location;
@@ -169,10 +144,16 @@ export const createExam = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
+    if (studentPopulation === undefined || studentPopulation === null) {
+      res.status(400).json({ success: false, message: 'studentPopulation is required' });
+      return;
+    }
+
     // Validate student IDs if provided
-    if (students && students.length > 0) {
-      const validStudents = await User.find({ _id: { $in: students }, role: 'student' });
-      if (validStudents.length !== students.length) {
+    let validatedStudents: any[] = [];
+    if (Array.isArray(students) && students.length > 0) {
+      validatedStudents = await User.find({ _id: { $in: students }, role: 'student' });
+      if (validatedStudents.length !== students.length) {
         res.status(400).json({ success: false, message: 'Some student IDs are invalid' });
         return;
       }
@@ -198,6 +179,7 @@ export const createExam = async (req: AuthRequest, res: Response): Promise<void>
       academicYear,
       createdBy: req.user._id,
       students: Array.isArray(students) ? students : [],
+      studentPopulation: population,
       invigilators: normalizedInvigilators,
       instructions,
       // Store optional admin fields so notifications can target students
@@ -256,8 +238,8 @@ export const getMyExams = async (req: AuthRequest, res: Response): Promise<void>
         return;
       }
 
-      const courseCodesFromForm = courseForm.courses.map((c) =>
-        normalizeCourseCode(c.courseCode)
+      const courseCodesFromForm = courseForm.courses.map((c: { courseCode?: string }) =>
+        normalizeCourseCode(c.courseCode || '')
       );
 
       // Get ALL published exams, filter by matching course codes
@@ -371,6 +353,7 @@ export const updateExam = async (req: AuthRequest, res: Response): Promise<void>
       semester,
       academicYear,
       status,
+      studentPopulation,
       invigilators,
       instructions,
     } = req.body;
@@ -397,6 +380,19 @@ export const updateExam = async (req: AuthRequest, res: Response): Promise<void>
     if (semester) exam.semester = semester;
     if (academicYear) exam.academicYear = academicYear;
     if (status) exam.status = status;
+
+    const population = studentPopulation !== undefined && studentPopulation !== null
+      ? Number(studentPopulation)
+      : undefined;
+
+    if (population !== undefined) {
+      if (Number.isNaN(population) || !Number.isInteger(population) || population < 0) {
+        res.status(400).json({ success: false, message: 'studentPopulation must be a non-negative integer' });
+        return;
+      }
+      exam.studentPopulation = population;
+    }
+
     if (Array.isArray(invigilators)) {
       exam.invigilators = invigilators
         .filter((name: any) => typeof name === 'string' && name.trim().length > 0)
@@ -815,7 +811,7 @@ export const getExamCalendar = async (req: AuthRequest, res: Response): Promise<
       const courseForm = await CourseFormModel.findOne({ faculty: student.faculty, level: student.level, status: 'approved' });
       if (!courseForm) { res.json({ success: true, events: [] }); return; }
 
-      const courseCodesFromForm = courseForm.courses.map((c) => normalizeCourseCode(c.courseCode));
+      const courseCodesFromForm = courseForm.courses.map((c: { courseCode?: string }) => normalizeCourseCode(c.courseCode || ''));
       const allPublishedExams = await Exam.find({ status: 'published' }).sort({ scheduleDate: 1 });
       exams = allPublishedExams.filter((exam) => courseCodesFromForm.includes(normalizeCourseCode(exam.courseCode)));
     } else if (req.user.role === 'exam_officer') {

@@ -3,6 +3,7 @@ import Event from '../models/Event.model';
 import User from '../models/User.model';
 import Notification from '../models/Notification.model';
 import { sendEventReminderEmail } from '../utils/mailer';
+import { sendBulkSms } from '../utils/sms';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 export const getEvents = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -42,9 +43,10 @@ export const createEvent = async (req: AuthRequest, res: Response): Promise<void
         courseOfStudy: event.courseOfStudy,
         role: 'student',
         isActive: true,
-      }).select('email');
+      }).select('email phone');
 
-      const emails = students.map(s => s.email);
+      const emails = students.map(s => s.email).filter(Boolean);
+      const phones = students.map(s => (s as any).phone).filter(Boolean);
 
       if (emails.length > 0) {
         const dateStr = event.date.toLocaleDateString('en-NG', {
@@ -71,6 +73,8 @@ export const createEvent = async (req: AuthRequest, res: Response): Promise<void
           message: `${event.category} scheduled for ${dateStr} at ${event.startTime}`,
           recipients: emails,
           recipientCount: emails.length,
+          smsRecipients: phones,
+          smsRecipientCount: phones.length,
           sentBy: req.user._id,
           faculty: event.faculty,
           level: event.level,
@@ -79,6 +83,11 @@ export const createEvent = async (req: AuthRequest, res: Response): Promise<void
           isAutomatic: false,
           deliveryStatus: 'sent',
         });
+
+        if (phones.length > 0) {
+          const smsText = `New ${event.category}: ${event.title} on ${dateStr} at ${event.startTime} — Venue: ${event.venue}`;
+          await sendBulkSms(phones, smsText);
+        }
 
         event.emailSent = true;
         event.emailSentAt = new Date();
@@ -123,9 +132,10 @@ export const sendManualReminder = async (req: AuthRequest, res: Response): Promi
       courseOfStudy: event.courseOfStudy,
       role: 'student',
       isActive: true,
-    }).select('email');
+    }).select('email phone');
 
-    const emails = students.map(s => s.email);
+    const emails = students.map(s => s.email).filter(Boolean);
+    const phones = students.map(s => (s as any).phone).filter(Boolean);
     if (emails.length === 0) {
       res.json({ success: true, message: 'No students to notify' });
       return;
@@ -149,12 +159,19 @@ export const sendManualReminder = async (req: AuthRequest, res: Response): Promi
       courseOfStudy: event.courseOfStudy,
     });
 
+    if (phones.length > 0) {
+      const smsText = `Reminder: ${event.title} on ${dateStr} at ${event.startTime} — Venue: ${event.venue}`;
+      await sendBulkSms(phones, smsText);
+    }
+
     await Notification.create({
       type: 'reminder',
       subject: `Reminder: ${event.title}`,
       message: `Manual reminder sent for ${event.courseCode}`,
       recipients: emails,
       recipientCount: emails.length,
+      smsRecipients: phones,
+      smsRecipientCount: phones.length,
       sentBy: req.user._id,
       faculty: event.faculty,
       level: event.level,
