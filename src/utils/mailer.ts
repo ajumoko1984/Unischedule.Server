@@ -215,4 +215,43 @@ export const sendPasswordResetEmail = async (
   });
 };
 
+export const sendInvigilatorAssignmentEmail = async (
+  recipients: string[],
+  data: {
+    courseCode: string;
+    courseTitle: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    venue: string;
+    studentPopulation?: number;
+  }
+): Promise<void> => {
+  const content = `
+    <div style="background:#dcfce7;border-left:4px solid #16a34a;border-radius:0 8px 8px 0;padding:16px 20px;margin-bottom:24px;">
+      <strong style="color:#166534;font-size:14px;">👨‍🏫 INVIGILATOR ASSIGNMENT</strong>
+    </div>
+    <h2 style="color:#1e293b;font-size:20px;margin:0 0 8px;">You've Been Assigned as an Invigilator</h2>
+    <p style="color:#64748b;font-size:14px;margin:0 0 24px;">You have been assigned to invigilate the following exam. Please review the details below and confirm your availability.</p>
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+      <tr style="background:#f8fafc;"><td style="padding:12px 16px;color:#64748b;font-size:13px;width:40%;">Course</td><td style="padding:12px 16px;color:#1e293b;font-size:13px;font-weight:600;">${data.courseCode} – ${data.courseTitle}</td></tr>
+      <tr><td style="padding:12px 16px;color:#64748b;font-size:13px;border-top:1px solid #e2e8f0;">Date</td><td style="padding:12px 16px;color:#1e293b;font-size:13px;border-top:1px solid #e2e8f0;font-weight:600;">${data.date}</td></tr>
+      <tr style="background:#f8fafc;"><td style="padding:12px 16px;color:#64748b;font-size:13px;border-top:1px solid #e2e8f0;">Time</td><td style="padding:12px 16px;color:#1e293b;font-size:13px;border-top:1px solid #e2e8f0;">${data.startTime} – ${data.endTime}</td></tr>
+      <tr><td style="padding:12px 16px;color:#64748b;font-size:13px;border-top:1px solid #e2e8f0;">Venue</td><td style="padding:12px 16px;color:#1e293b;font-size:13px;font-weight:500;border-top:1px solid #e2e8f0;">${data.venue}</td></tr>
+      ${data.studentPopulation ? `<tr style="background:#f8fafc;"><td style="padding:12px 16px;color:#64748b;font-size:13px;border-top:1px solid #e2e8f0;">Expected Students</td><td style="padding:12px 16px;color:#1e293b;font-size:13px;border-top:1px solid #e2e8f0;">${data.studentPopulation}</td></tr>` : ''}
+    </table>
+    <div style="background:#f0f4f8;border-radius:8px;padding:16px 20px;margin-bottom:24px;">
+      <p style="color:#1e293b;font-size:13px;margin:0;"><strong>Important:</strong> Please arrive at least 15 minutes before the scheduled start time. Ensure you have access to the venue and are familiar with the exam procedures.</p>
+    </div>
+    <p style="color:#64748b;font-size:13px;margin:0;">For any questions or concerns regarding this assignment, please contact the Exam Officer.</p>`;
+
+  await transporter.sendMail({
+    from: mailFrom,
+    to: mailFrom,
+    bcc: recipients,
+    subject: `👨‍🏫 Invigilator Assignment: ${data.courseCode} – ${data.date}`,
+    html: baseTemplate(content, `Invigilator assignment for ${data.courseCode}`),
+  });
+};
+
 export default transporter;
