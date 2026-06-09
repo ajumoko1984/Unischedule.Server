@@ -10,6 +10,7 @@ import {
   assignClassRep,
   revokeClassRep,
   checkLevelAdviserExists,
+  searchLecturers,
 } from '../controllers/user.controller';
 import { protect, authorize } from '../middleware/auth.middleware';
 
@@ -22,6 +23,9 @@ router.use(protect);
 
 // Stats — all authenticated roles
 router.get('/stats', getDashboardStats);
+
+// Search lecturers (for exam officer invigilator selection)
+router.get('/search/lecturers', searchLecturers);
 
 // Named routes — must come BEFORE /:id to avoid param conflicts
 router.get('/students-for-level', authorize('super_admin', 'level_adviser'), getStudentsForLevel);
