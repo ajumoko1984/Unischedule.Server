@@ -25,7 +25,7 @@ export interface IExam extends Document {
   faculty?: string;
   level?: string;
   courseOfStudy?: string;
-  invigilators?: string[]; // lecturer names invigilating
+  invigilators: mongoose.Types.ObjectId[]; // lecturer IDs invigilating
   instructions?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -63,7 +63,7 @@ const examSchema = new Schema<IExam>(
     faculty: { type: String },
     level: { type: String },
     courseOfStudy: { type: String },
-    invigilators: [{ type: String }],
+    invigilators: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     instructions: { type: String },
   },
   { timestamps: true }

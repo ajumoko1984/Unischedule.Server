@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import Exam, { IExam } from '../models/Exam.model';
 import User from '../models/User.model';
 import Notification from '../models/Notification.model';
-import { sendEventReminderEmail } from '../utils/mailer';
+import { sendEventReminderEmail, sendInvigilatorAssignmentEmail } from '../utils/mailer';
 import { sendBulkSms } from '../utils/sms';
 import { AuthRequest } from '../middleware/auth.middleware';
 
@@ -159,11 +159,15 @@ export const createExam = async (req: AuthRequest, res: Response): Promise<void>
       }
     }
 
-    const normalizedInvigilators = Array.isArray(invigilators)
-      ? invigilators
-          .filter((name: any) => typeof name === 'string' && name.trim().length > 0)
-          .map((name: string) => name.trim())
-      : [];
+    // Validate invigilator IDs if provided (must be lecturer/staff accounts)
+    let validatedInvigilators: any[] = [];
+    if (Array.isArray(invigilators) && invigilators.length > 0) {
+      validatedInvigilators = await User.find({ _id: { $in: invigilators }, role: 'lecturer', isActive: true });
+      if (validatedInvigilators.length !== invigilators.length) {
+        res.status(400).json({ success: false, message: 'Some invigilator IDs are invalid or inactive' });
+        return;
+      }
+    }
 
     const exam = await Exam.create({
       title,
@@ -180,13 +184,16 @@ export const createExam = async (req: AuthRequest, res: Response): Promise<void>
       createdBy: req.user._id,
       students: Array.isArray(students) ? students : [],
       studentPopulation: population,
-      invigilators: normalizedInvigilators,
+      invigilators: Array.isArray(invigilators) ? invigilators : [],
       instructions,
       // Store optional admin fields so notifications can target students
       faculty: faculty || req.user.faculty,
       level: level || req.user.level,
       courseOfStudy: courseOfStudy || req.user.courseOfStudy,
     });
+
+    // Populate invigilators before responding
+    await exam.populate('invigilators', 'fullName email');
 
     res.status(201).json({
       success: true,
@@ -212,6 +219,20 @@ export const getMyExams = async (req: AuthRequest, res: Response): Promise<void>
 
     const filter: any = { createdBy: req.user._id };
 
+    if (req.user.role === 'lecturer') {
+      // For lecturers, show exams they've been assigned to invigilate
+      const publishedExams = await Exam.find({ status: 'published', invigilators: req.user._id })
+        .populate('createdBy', 'fullName email')
+        .populate('invigilators', 'fullName email')
+        .sort({ scheduleDate: 1 });
+
+      res.json({
+        success: true,
+        count: publishedExams.length,
+        exams: publishedExams,
+      });
+      return;
+    }
     if (req.user.role === 'student' || req.user.role === 'class_rep') {
       const student = await User.findById(req.user._id);
       if (!student) {
@@ -263,6 +284,7 @@ export const getMyExams = async (req: AuthRequest, res: Response): Promise<void>
     const exams = await Exam.find(filter)
       .populate('createdBy', 'fullName email')
       .populate('students', 'fullName email matricNumber')
+      .populate('invigilators', 'fullName email')
       .sort({ scheduleDate: -1 });
 
     res.json({
@@ -287,7 +309,8 @@ export const getExamById = async (req: AuthRequest, res: Response): Promise<void
 
     const exam = await Exam.findById(req.params.id)
       .populate('createdBy', 'fullName email')
-      .populate('students', 'fullName email matricNumber');
+      .populate('students', 'fullName email matricNumber')
+      .populate('invigilators', 'fullName email');
 
     if (!exam) {
       res.status(404).json({ success: false, message: 'Exam not found' });
@@ -366,6 +389,7 @@ export const updateExam = async (req: AuthRequest, res: Response): Promise<void>
     const oldStart = exam.startTime;
     const oldEnd = exam.endTime;
     const oldVenue = exam.venue;
+    const oldInvigilators = exam.invigilators ? exam.invigilators.map((inv: any) => inv.toString()) : [];
 
     // Update fields
     if (title) exam.title = title;
@@ -393,10 +417,16 @@ export const updateExam = async (req: AuthRequest, res: Response): Promise<void>
       exam.studentPopulation = population;
     }
 
-    if (Array.isArray(invigilators)) {
-      exam.invigilators = invigilators
-        .filter((name: any) => typeof name === 'string' && name.trim().length > 0)
-        .map((name: string) => name.trim());
+    // Validate and update invigilators (must be active lecturer accounts)
+    if (Array.isArray(invigilators) && invigilators.length > 0) {
+      const validatedInvigilators = await User.find({ _id: { $in: invigilators }, role: 'lecturer', isActive: true });
+      if (validatedInvigilators.length !== invigilators.length) {
+        res.status(400).json({ success: false, message: 'Some invigilator IDs are invalid or inactive' });
+        return;
+      }
+      exam.invigilators = invigilators;
+    } else if (Array.isArray(invigilators) && invigilators.length === 0) {
+      exam.invigilators = [];
     }
     if (typeof instructions === 'string') {
       exam.instructions = instructions;
@@ -412,12 +442,20 @@ export const updateExam = async (req: AuthRequest, res: Response): Promise<void>
       if (endTime && oldEnd !== exam.endTime) changes.push('endTime');
       if (updateVenue && oldVenue !== exam.venue) changes.push('venue');
 
+      // Check if invigilators changed
+      const newInvigilators = exam.invigilators ? exam.invigilators.map((inv: any) => inv.toString()) : [];
+      const invigilatorsChanged = oldInvigilators.length !== newInvigilators.length || 
+        !oldInvigilators.every((inv: string) => newInvigilators.includes(inv));
+
       if (changes.length > 0) {
         await sendExamNotification(exam, req.user._id, { action: 'updated', reason: `Changed: ${changes.join(', ')}` });
       }
     } catch (notifyErr) {
       console.error('Failed to send update notifications:', notifyErr);
     }
+
+    // Populate invigilators before responding
+    await exam.populate('invigilators', 'fullName email');
 
     res.json({
       success: true,
@@ -578,7 +616,8 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    const exam = await Exam.findById(req.params.id);
+    const exam = await Exam.findById(req.params.id)
+      .populate('invigilators', 'email fullName');
 
     if (!exam) {
       res.status(404).json({ success: false, message: 'Exam not found' });
@@ -602,8 +641,31 @@ export const publishExam = async (req: AuthRequest, res: Response): Promise<void
     exam.status = 'published';
     await exam.save();
 
-    // Send notifications (best-effort)
+    // Send notifications to students (best-effort)
     await sendExamNotification(exam, req.user._id, { action: 'published' });
+
+    // Send invigilator assignment emails if any invigilators are assigned
+    if (exam.invigilators && exam.invigilators.length > 0) {
+      try {
+        const invigilatorEmails = (exam.invigilators as any[]).map((inv: any) => inv.email).filter(Boolean);
+        if (invigilatorEmails.length > 0) {
+          await sendInvigilatorAssignmentEmail(invigilatorEmails, {
+            courseCode: exam.courseCode || '',
+            courseTitle: exam.courseTitle || '',
+            date: exam.scheduleDate ? exam.scheduleDate.toDateString() : '',
+            startTime: exam.startTime || '',
+            endTime: exam.endTime || '',
+            venue: exam.venue || '',
+            studentPopulation: exam.studentPopulation,
+          });
+        }
+      } catch (emailErr) {
+        console.error('Failed to send invigilator assignment emails:', emailErr);
+      }
+    }
+
+    // Populate invigilators for response
+    await exam.populate('invigilators', 'fullName email');
 
     res.json({
       success: true,
@@ -633,6 +695,48 @@ export const getExamsByCourse = async (req: Request, res: Response): Promise<voi
       status: { $in: ['published', 'active', 'closed'] },
     })
       .populate('createdBy', 'fullName email')
+      .populate('invigilators', 'fullName email')
+      .sort({ scheduleDate: 1 });
+
+    res.json({
+      success: true,
+      count: exams.length,
+      exams,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+/**
+ * Get all published exams
+ */
+export const getPublishedExams = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Not authorized' });
+      return;
+    }
+
+    const { courseCode, academicYear, semester, faculty } = req.query;
+    const filter: any = { status: 'published' };
+
+    if (courseCode) {
+      filter.courseCode = normalizeCourseCode(courseCode.toString());
+    }
+    if (academicYear) {
+      filter.academicYear = academicYear;
+    }
+    if (semester) {
+      filter.semester = semester;
+    }
+    if (faculty) {
+      filter.faculty = faculty;
+    }
+
+    const exams = await Exam.find(filter)
+      .populate('createdBy', 'fullName email')
+      .populate('invigilators', 'fullName email')
       .sort({ scheduleDate: 1 });
 
     res.json({
