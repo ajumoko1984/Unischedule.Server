@@ -266,3 +266,37 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// ── Search lecturers by name (for exam officer invigilator selection) ────────
+export const searchLecturers = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ success: false, message: 'Not authorized' });
+      return;
+    }
+
+    const { search = '', limit = '20' } = req.query;
+    const searchStr = (search as string).trim();
+    const limitNum = Math.min(parseInt(limit as string) || 20, 100);
+
+    // Build search filter
+    const filter: Record<string, unknown> = { role: 'lecturer', isActive: true };
+
+    if (searchStr.length > 0) {
+      filter.fullName = { $regex: searchStr, $options: 'i' };
+    }
+
+    const lecturers = await User.find(filter)
+      .select('_id fullName email faculty level')
+      .limit(limitNum)
+      .sort({ fullName: 1 });
+
+    res.json({
+      success: true,
+      count: lecturers.length,
+      data: lecturers,
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};

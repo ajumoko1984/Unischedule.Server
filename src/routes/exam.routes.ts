@@ -11,6 +11,7 @@ import {
   publishExam,
   getExamCalendar,
   getExamsByCourse,
+  getPublishedExams,
   bulkImportExamsJson,
   bulkImportExamsCsv,
 } from '../controllers/exam.controller';
@@ -23,6 +24,7 @@ router.get('/course', getExamsByCourse); // Students: Get exams by course (timet
 // Student & Exam Officer routes (both can view their exams)
 router.get('/my-exams', protect, authorize('student', 'exam_officer', 'super_admin', 'class_rep', 'lecturer'), getMyExams); // Get enrolled/created exams
 router.get('/calendar', protect, authorize('student', 'exam_officer', 'super_admin', 'class_rep', 'lecturer'), getExamCalendar); // Calendar events
+router.get('/published', protect, authorize('student', 'class_rep', 'lecturer', 'level_adviser', 'exam_officer', 'super_admin'), getPublishedExams); // Get published exams
 
 // Exam Officer routes (only exam_officer and super_admin can create/manage)
 router.post('/', protect, authorize('exam_officer', 'super_admin'), createExam); // Create exam/test
